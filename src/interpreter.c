@@ -1,413 +1,259 @@
 #include "interpreter.h"
-#include "runtime.h"
+#include "runtime.h" 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-
-// Bytecode opcodes
-typedef enum {
-    OP_CONSTANT,
-    OP_ADD,
-    OP_SUBTRACT,
-    OP_MULTIPLY,
-    OP_DIVIDE,
-    OP_NEGATE,
-    OP_RETURN,
-    OP_REPETIR,        // REPETIR loop start
-    OP_END_REPETIR,    // REPETIR loop end
-    OP_POP
-} OpCode;
-
-int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
-    if (node == NULL) {
-        return 0;
-    }
-
-    switch (node->type) {
-        case PROGRAM_NODE:
-            // Process all sequential statements
-            // Sequential statements appear to be linked via right pointers starting from node->left
-            ASTNode* current = node->left;  // Start with the first statement
-            while (current != NULL) {
-                interpret_ast(current, symbol_table);
-                // Move to the next statement in the sequence (linked via right pointer)
-                current = current->right;
-            }
-            break;
-
-        case FN_CALL_NODE:
-            if (strcmp(node->value, "println") == 0) {
-                // Get the argument value (now supports variable lookup)
-                char* arg_value = NULL;
-                int found, is_string;
-
-                if (node->left != NULL) {
-                    if (node->left->type == IDENTIFIER_NODE) {
-                        // Check if this is a variable lookup
-                        arg_value = symbol_table_get(symbol_table, node->left->value, &found, &is_string);
-                        if (!found) {
-                            // If not found in symbol table, use as-is (might be a string literal)
-                            arg_value = node->left->value;
-                            // Check if it's a string literal
-                            if (arg_value[0] == '"' && arg_value[strlen(arg_value)-1] == '"') {
-                                is_string = 1;
-                            } else {
-                                is_string = 0;
-                            }
-                        }
-                    } else if (node->left->type == NUMBER_NODE) {
-                        arg_value = node->left->value;
-                        is_string = 0;
-                    }
-                }
-
-                if (arg_value != NULL) {
-                    // Remove quotes from string literals when printing (if it's a string literal stored in a variable)
-                    if (arg_value[0] == '"' && arg_value[strlen(arg_value)-1] == '"') {
-                        // It's a string literal, print without quotes
-                        char* str_without_quotes = malloc(strlen(arg_value) - 1);  // -1 to remove first quote
-                        strcpy(str_without_quotes, arg_value + 1);  // Skip first quote
-                        str_without_quotes[strlen(str_without_quotes)-1] = '\0';  // Remove last quote
-                        builtin_println(str_without_quotes);
-                        free(str_without_quotes);
-                    } else {
-                        // This could be a variable value (e.g., "42" from a number variable)
-                        builtin_println(arg_value);
-                    }
-                } else {
-                    builtin_println("");
-                }
-            }
-            else if (strcmp(node->value, "print") == 0) {
-                // Similar handling for print function
-                char* arg_value = NULL;
-                int found, is_string;
-
-                if (node->left != NULL) {
-                    if (node->left->type == IDENTIFIER_NODE) {
-                        // Check if this is a variable lookup
-                        arg_value = symbol_table_get(symbol_table, node->left->value, &found, &is_string);
-                        if (!found) {
-                            // If not found in symbol table, use as-is
-                            arg_value = node->left->value;
-                            // Check if it's a string literal
-                            if (arg_value[0] == '"' && arg_value[strlen(arg_value)-1] == '"') {
-                                is_string = 1;
-                            } else {
-                                is_string = 0;
-                            }
-                        }
-                    } else if (node->left->type == NUMBER_NODE) {
-                        arg_value = node->left->value;
-                        is_string = 0;
-                    }
-                }
-
-                if (arg_value != NULL) {
-                    // Remove quotes from string literals when printing
-                    if (arg_value[0] == '"' && arg_value[strlen(arg_value)-1] == '"') {
-                        // It's a string literal, print without quotes
-                        char* str_without_quotes = malloc(strlen(arg_value) - 1);  // -1 to remove first quote
-                        strcpy(str_without_quotes, arg_value + 1);  // Skip first quote
-                        str_without_quotes[strlen(str_without_quotes)-1] = '\0';  // Remove last quote
-                        builtin_print(str_without_quotes);
-                        free(str_without_quotes);
-                    } else {
-                        builtin_print(arg_value);
-                    }
-                }
-            }
-            // Colombian hero functions
-            else if (strcmp(node->value, "simon_bolivar") == 0) {
-                builtin_simon_bolivar();
-            }
-            else if (strcmp(node->value, "francisco_narino") == 0) {
-                builtin_francisco_narino();
-            }
-            else if (strcmp(node->value, "maria_cano") == 0) {
-                builtin_maria_cano();
-            }
-            else if (strcmp(node->value, "jorge_eliecer_gaitan") == 0) {
-                builtin_jorge_eliecer_gaitan();
-            }
-            else if (strcmp(node->value, "gabriel_garcia_marquez") == 0) {
-                builtin_gabriel_garcia_marquez();
-            }
-            else {
-                printf("Unknown function: %s\n", node->value);
-            }
-            break;
-
-        case BINARY_OP_NODE:
-            // Handle binary operations like +, -, *, / and comparisons
-            if (node->left != NULL && node->right != NULL) {
-                int left_val = interpret_ast(node->left, symbol_table);
-                int right_val = interpret_ast(node->right, symbol_table);
-
-                if (node->value != NULL) {
-                    if (strcmp(node->value, "+") == 0) {
-                        return left_val + right_val;
-                    } else if (strcmp(node->value, "-") == 0) {
-                        return left_val - right_val;
-                    } else if (strcmp(node->value, "*") == 0) {
-                        return left_val * right_val;
-                    } else if (strcmp(node->value, "/") == 0) {
-                        return right_val != 0 ? left_val / right_val : 0;  // avoid division by zero
-                    } else if (strcmp(node->value, ">") == 0) {
-                        return left_val > right_val ? 1 : 0;  // true if left > right
-                    } else if (strcmp(node->value, "<") == 0) {
-                        return left_val < right_val ? 1 : 0;  // true if left < right
-                    } else if (strcmp(node->value, ">=") == 0) {
-                        return left_val >= right_val ? 1 : 0;  // true if left >= right
-                    } else if (strcmp(node->value, "<=") == 0) {
-                        return left_val <= right_val ? 1 : 0;  // true if left <= right
-                    } else if (strcmp(node->value, "==") == 0) {
-                        return left_val == right_val ? 1 : 0;  // true if left == right
-                    } else if (strcmp(node->value, "!=") == 0) {
-                        return left_val != right_val ? 1 : 0;  // true if left != right
-                    }
-                }
-            }
-            return 0;
-
-        case NUMBER_NODE:
-            // For now, just return the value
-            return node->value ? atoi(node->value) : 0;
-
-        case IDENTIFIER_NODE:
-            // Look up variable value in symbol table
-            {
-                int found, is_string;
-                char* var_value = symbol_table_get(symbol_table, node->value, &found, &is_string);
-                if (found) {
-                    return var_value ? atoi(var_value) : 0;
-                } else {
-                    // If not found, return 0 (or handle as needed)
-                    return 0;
-                }
-            }
-
-        case VAR_DECL_NODE:
-        case VAR_DECL_SPANISH_NODE:
-            // Handle variable declarations: store the variable in the symbol table
-            if (node->value != NULL && node->left != NULL) {
-                char* value_to_store = NULL;
-                int is_string_type = 0;
-
-                // Check if the expression is a string literal (has quotes)
-                if (node->left->type == IDENTIFIER_NODE && node->left->value != NULL) {
-                    char* expr_value = node->left->value;
-                    if (expr_value[0] == '"' && expr_value[strlen(expr_value)-1] == '"') {
-                        // This is a string literal, store directly
-                        value_to_store = expr_value;
-                        is_string_type = 1;
-                    }
-                }
-
-                if (value_to_store != NULL) {
-                    // Remove quotes from string literal before storing
-                    char* str_without_quotes = malloc(strlen(value_to_store) - 1);
-                    strcpy(str_without_quotes, value_to_store + 1);  // Skip first quote
-                    str_without_quotes[strlen(str_without_quotes)-1] = '\0';  // Remove last quote
-                    symbol_table_set(symbol_table, node->value, str_without_quotes, is_string_type);
-                    free(str_without_quotes);
-                } else {
-                    // Evaluate as expression (number, variable reference, etc.)
-                    int expr_result = interpret_ast(node->left, symbol_table);
-                    char result_str[32];
-                    sprintf(result_str, "%d", expr_result);
-                    symbol_table_set(symbol_table, node->value, result_str, 0); // 0 indicates not a string
-                }
-            }
-            break;
-
-        case EXPRESSION_NODE:
-            if (node->left != NULL) {
-                interpret_ast(node->left, symbol_table);
-            }
-            break;
-
-        case IF_SPANISH_NODE:
-            // Handle "si" (if) statements
-            // For now, just evaluate the condition (full implementation would include blocks)
-            if (node->left != NULL) {
-                interpret_ast(node->left, symbol_table);
-            }
-            break;
-
-        case WHILE_SPANISH_NODE:
-            // Handle "mientras" (while) statements
-            if (node->left != NULL) {  // node->left is the condition
-                // Loop until condition becomes false
-                while (interpret_ast(node->left, symbol_table) != 0) {
-                    // Execute loop body (node->right) - execute all statements in the sequence
-                    ASTNode* current_stmt = node->right;
-                    while (current_stmt != NULL) {
-                        interpret_ast(current_stmt, symbol_table);
-                        current_stmt = current_stmt->right;
-                    }
-                }
-            }
-            break;
-
-        case ASSIGN_NODE:
-            // Handle assignment: update the variable in the symbol table
-            if (node->value != NULL && node->left != NULL) {
-                // Evaluate the expression to assign
-                int expr_result = interpret_ast(node->left, symbol_table);
-
-                // Convert result to string for storage
-                char result_str[32];
-                sprintf(result_str, "%d", expr_result);
-
-                // Store in symbol table
-                symbol_table_set(symbol_table, node->value, result_str, 0); // 0 indicates not a string
-            }
-            break;
-
-        case UNARY_OP_NODE:
-            // Handle unary operations like "no" (not)
-            if (node->value != NULL && node->right != NULL) {
-                if (strcmp(node->value, "no") == 0) {
-                    return !interpret_ast(node->right, symbol_table);
-                }
-                // Add additional unary operators as needed
-            }
-            return 0;
-
-        default:
-            break;
-    }
-
-    return 0;
-}
 
 void print_ast(ASTNode* node, int depth) {
     if (node == NULL) return;
 
-    // Add a depth limit to prevent infinite recursion in case of cycles
-    if (depth > 100) {  // reasonable limit to catch infinite loops
-        for (int i = 0; i < depth; i++) {
-            printf("  ");
-        }
-        printf("[DEPTH LIMIT REACHED - POSSIBLE CYCLE]\n");
-        return;
-    }
-
+    // Print indentation
     for (int i = 0; i < depth; i++) {
         printf("  ");
     }
 
+    // Print node info based on type
     switch (node->type) {
         case PROGRAM_NODE:
-            printf("PROGRAM_NODE\n");
+            printf("PROGRAM\n");
             break;
-        case FN_CALL_NODE:
-            printf("FN_CALL_NODE: %s\n", node->value ? node->value : "NULL");
+        case EXPRESSION_NODE:
+            printf("EXPRESSION: %s\n", node->value ? node->value : "(null)");
+            break;
+        case BINARY_OP_NODE:
+            printf("BINARY_OP: %s\n", node->value ? node->value : "(null)");
             break;
         case NUMBER_NODE:
-            printf("NUMBER_NODE: %s\n", node->value ? node->value : "NULL");
+            printf("NUMBER: %s\n", node->value ? node->value : "(null)");
             break;
         case IDENTIFIER_NODE:
-            printf("IDENTIFIER_NODE: %s\n", node->value ? node->value : "NULL");
+            printf("IDENTIFIER: %s\n", node->value ? node->value : "(null)");
+            break;
+        case STRING_LITERAL_NODE:
+            printf("STRING: %s\n", node->value ? node->value : "(null)");
             break;
         case VAR_DECL_NODE:
-            printf("VAR_DECL_NODE: %s\n", node->value ? node->value : "NULL");
+            printf("VAR_DECL: %s\n", node->value ? node->value : "(null)");
+            break;
+        case FN_DECL_NODE:
+            printf("FN_DECL: %s\n", node->value ? node->value : "(null)");
+            break;
+        case FN_CALL_NODE:
+            printf("FN_CALL: %s\n", node->value ? node->value : "(null)");
+            break;
+        case IF_NODE:
+            printf("IF\n");
+            break;
+        case WHILE_NODE:
+            printf("WHILE\n");
+            break;
+        case ASSIGN_NODE:
+            printf("ASSIGN: %s\n", node->value ? node->value : "(null)");
+            break;
+        case VAR_DECL_SPANISH_NODE:
+            printf("VAR_DECL_SPANISH: %s\n", node->value ? node->value : "(null)");
+            break;
+        case FN_DECL_SPANISH_NODE:
+            printf("FN_DECL_SPANISH: %s\n", node->value ? node->value : "(null)");
+            break;
+        case IF_SPANISH_NODE:
+            printf("IF_SPANISH\n");
+            break;
+        case WHILE_SPANISH_NODE:
+            printf("WHILE_SPANISH\n");
+            break;
+        case FOR_SPANISH_NODE:
+            printf("FOR_SPANISH: %s\n", node->value ? node->value : "(null)");
+            break;
+        case UNARY_OP_NODE:
+            printf("UNARY_OP: %s\n", node->value ? node->value : "(null)");
+            break;
+        case CONDITION_NODE:
+            printf("CONDITION\n");
             break;
         default:
-            printf("OTHER_NODE: %d\n", node->type);
+            printf("UNKNOWN NODE TYPE: %d\n", node->type);
             break;
     }
 
-    if (node->left != NULL) {
+    // Recursively print children
+    if (node->left) {
         print_ast(node->left, depth + 1);
     }
-    if (node->right != NULL) {
+    if (node->right) {
         print_ast(node->right, depth + 1);
     }
 }
 
-// Bytecode interpreter function
-int interpret_bytecode(uint8_t* bytecode, size_t bytecode_length) {
-    size_t pc = 0; // program counter
-    int stack[256];
-    int* stack_pointer = stack;
-    int loop_start[32];  // Track start position of loops
-    int loop_depth = 0;  // Current loop nesting depth
+int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
+    if (node == NULL) return 0;
 
-    while (pc < bytecode_length) {
-        OpCode instruction = (OpCode)bytecode[pc++];
-
-        switch (instruction) {
-            case OP_CONSTANT: {
-                int constant = *(int*)&bytecode[pc];
-                pc += sizeof(int);
-                *stack_pointer++ = constant;
-                break;
+    switch (node->type) {
+        case PROGRAM_NODE: {
+            ASTNode* current = node->left;
+            while (current != NULL) {
+                interpret_ast(current, symbol_table);
+                current = current->right;
             }
-
-            case OP_ADD: {
-                int b = *--stack_pointer;
-                int a = *--stack_pointer;
-                *stack_pointer++ = a + b;
-                break;
-            }
-
-            case OP_SUBTRACT: {
-                int b = *--stack_pointer;
-                int a = *--stack_pointer;
-                *stack_pointer++ = a - b;
-                break;
-            }
-
-            case OP_MULTIPLY: {
-                int b = *--stack_pointer;
-                int a = *--stack_pointer;
-                *stack_pointer++ = a * b;
-                break;
-            }
-
-            case OP_DIVIDE: {
-                int b = *--stack_pointer;
-                int a = *--stack_pointer;
-                if (b != 0) {
-                    *stack_pointer++ = a / b;
-                } else {
-                    *stack_pointer++ = 0; // Avoid division by zero
-                }
-                break;
-            }
-
-            case OP_NEGATE: {
-                int value = *--stack_pointer;
-                *stack_pointer++ = -value;
-                break;
-            }
-
-            case OP_REPETIR:
-                // REPETIR loop start - remember where condition is evaluated
-                loop_start[loop_depth] = pc;
-                break;
-
-            case OP_END_REPETIR:
-                // Fixed: jump back to condition so it can be re-evaluated
-                pc = loop_start[loop_depth];  // already points to OP_REPETIR (condition) → correct
-                // Remove or comment the printf to stop spam
-                // printf("Loop has ended keep repeating\n");
-                break;
-
-            case OP_POP:
-                --stack_pointer;
-                break;
-
-            case OP_RETURN:
-                return 0; // Normal return
-
-            default:
-                printf("Unknown opcode: %d\n", instruction);
-                return -1; // Error
+            break;
         }
+
+        case FN_CALL_NODE: {
+            if (strcmp(node->value, "println") == 0 || strcmp(node->value, "print") == 0) {
+                int ln = (strcmp(node->value, "println") == 0);
+                char* arg_value = NULL;
+                int found, is_string;
+
+                if (node->left != NULL) {
+                    if (node->left->type == IDENTIFIER_NODE) {
+                        arg_value = symbol_table_get(symbol_table, node->left->value, &found, &is_string);
+                        if (!found) {
+                            arg_value = node->left->value;
+                            // Check if it's a string literal
+                            if (arg_value[0] == '"' && arg_value[strlen(arg_value)-1] == '"') {
+                                is_string = 1;
+                            }
+                        }
+                    } else if (node->left->type == NUMBER_NODE) {
+                        arg_value = node->left->value;
+                        is_string = 0;
+                    } else if (node->left->type == STRING_LITERAL_NODE) {
+                        arg_value = node->left->value;
+                        is_string = 1;
+                    }
+                }
+
+                if (arg_value) {
+                    if (is_string) {
+                        // Remove quotes for printing
+                        if (arg_value[0] == '"' && arg_value[strlen(arg_value)-1] == '"') {
+                            char* clean = malloc(strlen(arg_value) - 1);
+                            strcpy(clean, arg_value + 1);
+                            clean[strlen(clean)-1] = '\0';
+                            ln ? builtin_println(clean) : builtin_print(clean);
+                            free(clean);
+                        } else {
+                            ln ? builtin_println(arg_value) : builtin_print(arg_value);
+                        }
+                    } else {
+                        int num = atoi(arg_value);
+                        char buffer[32];
+                        sprintf(buffer, "%d", num);
+                        ln ? builtin_println(buffer) : builtin_print(buffer);
+                    }
+                } else {
+                    ln ? builtin_println("") : builtin_print("");
+                }
+            }
+            // Handle Colombian historical figures
+            else if (strcmp(node->value, "simon_bolivar") == 0 || strcmp(node->value, "bolivar") == 0) builtin_simon_bolivar();
+            else if (strcmp(node->value, "francisco_narino") == 0 || strcmp(node->value, "narino") == 0) builtin_francisco_narino();
+            else if (strcmp(node->value, "maria_cano") == 0 || strcmp(node->value, "cano") == 0) builtin_maria_cano();
+            else if (strcmp(node->value, "jorge_eliecer_gaitan") == 0 || strcmp(node->value, "gaitan") == 0) builtin_jorge_eliecer_gaitan();
+            else if (strcmp(node->value, "gabriel_garcia_marquez") == 0 || strcmp(node->value, "garcia") == 0) builtin_gabriel_garcia_marquez();
+            else {
+                printf("Unknown function: %s\n", node->value);
+            }
+            break;
+        }
+
+        case VAR_DECL_NODE:
+        case VAR_DECL_SPANISH_NODE: {
+            // Handle variable declaration: let x = expression;
+            char* var_name = node->value;
+            if (node->left != NULL) {  // There is an expression to assign
+                int value = interpret_ast(node->left, symbol_table);
+                char value_str[32];
+                sprintf(value_str, "%d", value);
+                symbol_table_set(symbol_table, var_name, value_str, 0); // 0 = not string
+            } else {
+                // Just declare variable with default value
+                symbol_table_set(symbol_table, var_name, "0", 0); // 0 = not string
+            }
+            break;
+        }
+
+        case ASSIGN_NODE: {
+            // Handle assignment: x = expression;
+            char* var_name = node->value;
+            if (node->left != NULL) {
+                int value = interpret_ast(node->left, symbol_table);
+                char value_str[32];
+                sprintf(value_str, "%d", value);
+                symbol_table_set(symbol_table, var_name, value_str, 0); // 0 = not string
+            }
+            break;
+        }
+
+        case BINARY_OP_NODE: {
+            if (!node->left || !node->right) return 0;
+            int a = interpret_ast(node->left, symbol_table);
+            int b = interpret_ast(node->right, symbol_table);
+            
+            if (!node->value) return 0;
+            
+            if (strcmp(node->value, "+") == 0) return a + b;
+            else if (strcmp(node->value, "-") == 0) return a - b;
+            else if (strcmp(node->value, "*") == 0) return a * b;
+            else if (strcmp(node->value, "/") == 0) return b != 0 ? a / b : 0;
+            else if (strcmp(node->value, ">") == 0) return a > b;
+            else if (strcmp(node->value, "<") == 0) return a < b;
+            else if (strcmp(node->value, ">=") == 0) return a >= b;
+            else if (strcmp(node->value, "<=") == 0) return a <= b;
+            else if (strcmp(node->value, "==") == 0) return a == b;
+            else if (strcmp(node->value, "!=") == 0) return a != b;
+            return 0;
+        }
+
+        case NUMBER_NODE:
+            return node->value ? atoi(node->value) : 0;
+
+        case IDENTIFIER_NODE: {
+            int found, is_string;
+            char* val = symbol_table_get(symbol_table, node->value, &found, &is_string);
+            return found && val ? atoi(val) : 0;
+        }
+
+        case IF_SPANISH_NODE:  // Handle "si" (if) statements
+        case IF_NODE: {
+            int condition = interpret_ast(node->left, symbol_table);  // condition
+            if (condition) {
+                interpret_ast(node->right, symbol_table);  // then block
+            }
+            break;
+        }
+
+        case WHILE_SPANISH_NODE:  // Handle "mientras" (while) loops
+        case WHILE_NODE: {
+            int condition = interpret_ast(node->left, symbol_table);  // condition
+            while (condition) {
+                interpret_ast(node->right, symbol_table);  // body
+                condition = interpret_ast(node->left, symbol_table);  // re-evaluate condition
+            }
+            break;
+        }
+
+        case FN_DECL_NODE:
+        case FN_DECL_SPANISH_NODE: {
+            // Function declarations don't execute during interpretation, just store for future calls
+            break;
+        }
+
+        case UNARY_OP_NODE: {
+            if (!node->right) return 0;
+            int value = interpret_ast(node->right, symbol_table);
+            if (node->value && strcmp(node->value, "no") == 0) {  // Spanish "not"
+                return !value;
+            }
+            return value;
+        }
+
+        case CONDITION_NODE: {
+            return interpret_ast(node->left, symbol_table);
+        }
+
+        default:
+            break;
     }
 
     return 0;

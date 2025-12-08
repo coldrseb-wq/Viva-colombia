@@ -17,12 +17,41 @@ ASTNode* init_ast_node(NodeType type) {
 
 void free_ast_node(ASTNode* node) {
     if (node != NULL) {
-        free_ast_node(node->left);
-        free_ast_node(node->right);
-        if (node->value != NULL) {
-            free(node->value);
+        // Validate the node type to catch corruption early
+        NodeType type = node->type;
+
+        // Only proceed with freeing if the type looks valid
+        // This prevents freeing corrupted memory structures
+        if (type >= PROGRAM_NODE && type <= CONDITION_NODE) {
+            // To handle potential circular references, set pointers to NULL before freeing
+            // to avoid accessing memory after it's freed
+            ASTNode* left = node->left;
+            ASTNode* right = node->right;
+
+            // Set to NULL before recursively freeing to avoid issues with circular references
+            node->left = NULL;
+            node->right = NULL;
+
+            // Free the subtrees
+            if (left != NULL) {
+                free_ast_node(left);
+            }
+            if (right != NULL) {
+                free_ast_node(right);
+            }
+
+            // Free value if exists
+            if (node->value != NULL) {
+                free(node->value);
+            }
+
+            // Finally free the node itself
+            free(node);
+        } else {
+            // Node is corrupted, just free it directly without recursion to avoid segfault
+            free(node->value);  // Free value if it exists
+            free(node);         // Free the corrupted node
         }
-        free(node);
     }
 }
 
@@ -111,40 +140,85 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
     return node;
 }
 
+// Operator precedence levels
+typedef enum {
+    PREC_NONE,
+    PREC_ASSIGNMENT,  // =
+    PREC_OR,          // or, ||
+    PREC_AND,         // and, &&
+    PREC_EQUALITY,    // ==, !=
+    PREC_COMPARISON,  // <, >, <=, >=
+    PREC_TERM,        // +, -
+    PREC_FACTOR,      // *, /
+    PREC_UNARY,       // !, - (unary)
+    PREC_PRIMARY      // numbers, identifiers, grouping
+} Precedence;
+
+Precedence get_precedence(TokenType type) {
+    switch (type) {
+        case PLUS:
+        case MINUS:
+            return PREC_TERM;
+        case MULTIPLY:
+        case DIVIDE:
+            return PREC_FACTOR;
+        case EQUALITY:
+        case NOT_EQUAL:
+            return PREC_EQUALITY;
+        case LESS_THAN:
+        case GREATER_THAN:
+            return PREC_COMPARISON;
+        default:
+            return PREC_NONE;
+    }
+}
+
 // Parse a simple expression with operators (with precedence)
-ASTNode* parse_expression(TokenStream* tokens, int* pos) {
+ASTNode* parse_expression_helper(TokenStream* tokens, int* pos, Precedence precedence) {
     ASTNode* left = parse_primary(tokens, pos);
     if (left == NULL) {
         return NULL;
     }
 
-    // Handle binary operators with precedence
-    // For simplicity, we'll implement a basic operator precedence
     while (*pos < tokens->count) {
         Token* current_token = tokens->tokens[*pos];
-        if (is_operator(current_token->type)) {
-            // Create a binary operation node
-            ASTNode* op_node = init_ast_node(BINARY_OP_NODE);
-            op_node->value = strdup(current_token->value);  // operator symbol
-            op_node->left = left;  // left operand
-            (*pos)++;  // skip operator
+        Precedence current_prec = get_precedence(current_token->type);
 
-            // Parse the right operand
-            op_node->right = parse_primary(tokens, pos);
-            if (op_node->right == NULL) {
-                // If we can't parse the right operand, return the left part
-                free_ast_node(op_node);
-                return left;
-            }
-
-            left = op_node;  // The result becomes the new left operand
-        } else {
-            // Not an operator, stop parsing
+        if (current_prec < precedence) {
             break;
         }
+
+        // Consume the operator token
+        (*pos)++;
+
+        // Create a binary operation node
+        ASTNode* op_node = init_ast_node(BINARY_OP_NODE);
+        op_node->value = strdup(current_token->value);  // operator symbol
+        op_node->left = left;  // left operand
+
+        // Parse the right operand with higher precedence to handle left associativity correctly
+        Precedence next_precedence = current_prec + 1;
+        op_node->right = parse_expression_helper(tokens, pos, next_precedence);
+
+        if (op_node->right == NULL) {
+            // If we can't parse the right operand, return the left part
+            // Important: Only free the operator node we just created, not its left child
+            // which might be a valid node in the AST
+            free(op_node->value);  // Free the operator value
+            free(op_node);         // Free the operator node itself
+            // Don't free op_node->left or op_node->right as they might be valid AST parts
+            return left;
+        }
+
+        left = op_node;  // The result becomes the new left operand
     }
 
     return left;
+}
+
+// Main expression parsing function that starts at lowest precedence
+ASTNode* parse_expression(TokenStream* tokens, int* pos) {
+    return parse_expression_helper(tokens, pos, PREC_NONE);
 }
 
 ASTNode* parse_statement(TokenStream* tokens, int* pos) {

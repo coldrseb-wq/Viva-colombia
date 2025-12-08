@@ -1,9 +1,1 @@
-// Simple test program for Viva language
-let x = 42;
-let y = 10;
-
-fn add(a, b) {
-    return a + b;
-}
-
-let result = add(x, y);
+println "Test"

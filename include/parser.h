@@ -9,6 +9,7 @@ typedef enum {
     BINARY_OP_NODE,         // For binary operations like +, -, *, /
     NUMBER_NODE,
     IDENTIFIER_NODE,
+    STRING_LITERAL_NODE,    // For string literals
     VAR_DECL_NODE,
     FN_DECL_NODE,
     FN_CALL_NODE,
