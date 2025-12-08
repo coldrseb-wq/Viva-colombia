@@ -1,0 +1,6 @@
+// Test of Spanish conditionals
+decreto x = 10;
+si (x > 5) {
+    println("x es mayor que 5");
+}
+println("Fin del programa");

@@ -1,0 +1,60 @@
+# Compiled files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+
+# Executables
+viva
+colombian_*
+basic_*
+debug_*
+expr_*
+hello_*
+heroes_*
+num_*
+simple_*
+test_*
+variable_*
+direct_num_*
+final_*
+fn_*
+
+# Build directories
+build/
+target/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Output files
+*.c.output
+*.s.output
+*.asm
+*.exe
+*.out
+
+# Backup files
+*~
+*.backup
+*_backup
+backup_*
+
+# Generated files
+*_output.c
+*_exec
+*_fixed.c
+*_fixed.s
+*_simplified.c

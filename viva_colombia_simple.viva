@@ -1,0 +1,29 @@
+// Viva Colombia - Programa de ejemplo - Versión funcional
+// Lenguaje de programación en español colombiano
+
+println("Bienvenidos al lenguaje Viva - Inspirado en la rica historia de Colombia");
+println("");
+
+// Demostración de la palabra clave 'decreto' (refiriéndose a los decretos históricos colombianos)
+println("Colombia inició su independencia en el año:");
+println("1810");
+
+println("Capital de Colombia:");
+println("Bogotá");
+
+// Invocación de funciones que honran a los héroes colombianos
+println("");
+println("Héroes que forjaron la nación:");
+simon_bolivar();
+francisco_narino();
+maria_cano();
+jorge_eliecer_gaitan();
+gabriel_garcia_marquez();
+
+// Demostración de bucles en español (cuando implementemos while/mientras)
+println("");
+println("Viva la tierra de los heroes colombianos!");
+println("Viva Colombia!");
+println("");
+println("Este lenguaje está inspirado en la rica historia y cultura colombiana");
+println("desde los próceres de la independencia hasta los Nobel de Literatura");

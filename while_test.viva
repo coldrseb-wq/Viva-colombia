@@ -1,0 +1,8 @@
+// Test while loop to ensure it doesn't cause infinite execution
+decreto counter = 5;
+mientras (counter > 0) {
+    println(counter);
+    decreto new_counter = counter - 1;
+    counter = new_counter;
+}
+println("Loop ended");

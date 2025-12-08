@@ -1,0 +1,59 @@
+// Viva Compiler written in Viva language
+// Bootstrap phase 1: A compiler for Viva written in Viva
+
+// Basic tokenizer functionality
+decreto token_types = "IDENTIFIER NUMBER STRING PLUS MINUS MULTIPLY DIVIDE ASSIGN LPAREN RPAREN LBRACE RBRACE SEMICOLON LET FN";
+
+// Main compiler function
+fn compile_program(source) {
+    // Tokenize the source
+    decreto tokens = tokenize(source);
+    
+    // Parse tokens into AST
+    decreto ast = parse_program(tokens);
+    
+    // Generate C code from AST
+    decreto c_code = generate_c_code(ast);
+    
+    // Return the generated C code
+    retorno c_code;
+}
+
+// Simple tokenizer
+fn tokenize(source) {
+    // For bootstrap purposes, we'll create a basic tokenizer
+    // In a full implementation this would break source into tokens
+    println("Tokenizing source...");
+    // Return a simple representation of tokens
+    retorno "tokens";
+}
+
+// Simple parser
+fn parse_program(tokens) {
+    println("Parsing program...");
+    // Return a simple AST representation
+    retorno "ast";
+}
+
+// Simple C code generator
+fn generate_c_code(ast) {
+    println("Generating C code...");
+    // Generate basic C code structure
+    decreto c_code = "#include <stdio.h>\n#include <stdlib.h>\n\nint main() {\n    // Generated code goes here\n    return 0;\n}";
+    retorno c_code;
+}
+
+// Main entry point for the compiler
+fn main() {
+    println("Viva Compiler written in Viva - Bootstrap Implementation");
+    println("This is the first step toward self-hosting compilation");
+    
+    // Example: compile a simple program
+    decreto sample_viva_code = "println(\"Hello from Viva compiler!\");";
+    decreto result = compile_program(sample_viva_code);
+    println("Compilation result:");
+    println(result);
+}
+
+// Execute the main function
+main();

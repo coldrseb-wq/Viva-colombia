@@ -1,0 +1,1 @@
+decreto x = 10; println(x); x = 5; println(x);

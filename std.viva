@@ -1,0 +1,51 @@
+// Standard library for Viva language
+// This will be built into the language implementation
+
+// Basic math functions
+fn add(a, b) {
+    // This would be implemented in the interpreter
+    // For now, we're defining the interface
+}
+
+fn subtract(a, b) {
+    // Placeholder for subtraction implementation
+}
+
+fn multiply(a, b) {
+    // Placeholder for multiplication implementation
+}
+
+fn divide(a, b) {
+    // Placeholder for division implementation
+}
+
+// String manipulation functions
+fn string_length(s) {
+    // Would internally call builtin_strlen
+}
+
+fn print(s) {
+    // Would internally call builtin_print
+}
+
+fn println(s) {
+    // Would internally call builtin_println
+}
+
+// Memory management functions
+fn allocate(size) {
+    // Allocates memory of given size
+}
+
+fn deallocate(ptr) {
+    // Frees allocated memory
+}
+
+// Control flow helpers
+fn assert(condition) {
+    // Halts execution if condition is false
+}
+
+fn assert_eq(a, b) {
+    // Halts execution if a != b
+}
