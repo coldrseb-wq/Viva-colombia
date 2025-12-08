@@ -3,6 +3,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+
+// Bytecode opcodes
+typedef enum {
+    OP_CONSTANT,
+    OP_ADD,
+    OP_SUBTRACT,
+    OP_MULTIPLY,
+    OP_DIVIDE,
+    OP_NEGATE,
+    OP_RETURN,
+    OP_REPETIR,        // REPETIR loop start
+    OP_END_REPETIR,    // REPETIR loop end
+    OP_POP
+} OpCode;
 
 int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
     if (node == NULL) {
@@ -311,4 +326,89 @@ void print_ast(ASTNode* node, int depth) {
     if (node->right != NULL) {
         print_ast(node->right, depth + 1);
     }
+}
+
+// Bytecode interpreter function
+int interpret_bytecode(uint8_t* bytecode, size_t bytecode_length) {
+    size_t pc = 0; // program counter
+    int stack[256];
+    int* stack_pointer = stack;
+    int loop_start[32];  // Track start position of loops
+    int loop_depth = 0;  // Current loop nesting depth
+
+    while (pc < bytecode_length) {
+        OpCode instruction = (OpCode)bytecode[pc++];
+
+        switch (instruction) {
+            case OP_CONSTANT: {
+                int constant = *(int*)&bytecode[pc];
+                pc += sizeof(int);
+                *stack_pointer++ = constant;
+                break;
+            }
+
+            case OP_ADD: {
+                int b = *--stack_pointer;
+                int a = *--stack_pointer;
+                *stack_pointer++ = a + b;
+                break;
+            }
+
+            case OP_SUBTRACT: {
+                int b = *--stack_pointer;
+                int a = *--stack_pointer;
+                *stack_pointer++ = a - b;
+                break;
+            }
+
+            case OP_MULTIPLY: {
+                int b = *--stack_pointer;
+                int a = *--stack_pointer;
+                *stack_pointer++ = a * b;
+                break;
+            }
+
+            case OP_DIVIDE: {
+                int b = *--stack_pointer;
+                int a = *--stack_pointer;
+                if (b != 0) {
+                    *stack_pointer++ = a / b;
+                } else {
+                    *stack_pointer++ = 0; // Avoid division by zero
+                }
+                break;
+            }
+
+            case OP_NEGATE: {
+                int value = *--stack_pointer;
+                *stack_pointer++ = -value;
+                break;
+            }
+
+            case OP_REPETIR:
+                // REPETIR loop start - remember where condition is evaluated
+                loop_start[loop_depth] = pc;
+                break;
+
+            case OP_END_REPETIR:
+                // Fixed: jump back to condition so it can be re-evaluated
+                pc = loop_start[loop_depth];  // already points to OP_REPETIR (condition) → correct
+                // Remove or comment the printf to stop spam
+                // printf("Loop has ended keep repeating\n");
+                break;
+
+            case OP_POP:
+                --stack_pointer;
+                break;
+
+            case OP_RETURN:
+                return 0; // Normal return
+
+            default:
+                printf("Unknown opcode: %d\n", instruction);
+                return -1; // Error
+        }
+    }
+
+    return 0;
 }
