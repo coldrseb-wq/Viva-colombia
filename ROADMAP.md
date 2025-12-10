@@ -117,6 +117,9 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Array assignments (`arr[index] = value`)
 - ✅ Array access in expressions (`arr[0] + arr[1]`)
 - ✅ Array access in print statements (`println(arr[0])`)
+- ✅ Modulo operator (`%`) for arithmetic operations
+- ✅ String length function (`len()`/`largo()`)
+- ✅ Character access in strings (`s[0]` returns ASCII code)
 
 ### Current Tasks:
 - [ ] Advanced machine code optimization passes
@@ -158,7 +161,7 @@ The compiler now generates proper platform-specific object files (ELF, Mach-O, P
 
 ### Verified Working Features (via stress_test.viva, func_test.viva, return_test.viva, for_test.viva, array_test.viva):
 - Variables and assignments
-- Arithmetic operations (+, -, *, /)
+- Arithmetic operations (+, -, *, /, %)
 - Complex expressions with precedence
 - All comparison operators (<, >, <=, >=, ==, !=)
 - If statements with else blocks
@@ -168,6 +171,8 @@ The compiler now generates proper platform-specific object files (ELF, Mach-O, P
 - Nested for loops
 - Arrays (declaration, assignment, access)
 - String handling and printing
+- String length function (len/largo)
+- Character access in strings
 - Colombian hero functions (bolivar, garcia, etc.)
 - User-defined functions with parameters (fn/cancion)
 - Multi-argument function calls
