@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// ELF (Executable and Linkable Format) definitions
+// === ELF DEFINITIONS ===
 #define EI_NIDENT 16
 
 typedef struct {
@@ -25,7 +25,6 @@ typedef struct {
     uint16_t e_shstrndx;
 } Elf64_Ehdr;
 
-// Section header
 typedef struct {
     uint32_t sh_name;
     uint32_t sh_type;
@@ -39,7 +38,6 @@ typedef struct {
     uint64_t sh_entsize;
 } Elf64_Shdr;
 
-// Symbol table entry
 typedef struct {
     uint32_t st_name;
     uint8_t st_info;
@@ -49,75 +47,22 @@ typedef struct {
     uint64_t st_size;
 } Elf64_Sym;
 
-// Mach-O (macOS) definitions
-#define MH_MAGIC_64 0xfeedfacf
-#define MH_EXECUTE 0x2
-#define MH_OBJECT 0x1
+typedef struct {
+    uint64_t r_offset;
+    uint64_t r_info;
+} Elf64_Rel;
 
 typedef struct {
-    uint32_t magic;
-    int32_t cputype;
-    int32_t cpusubtype;
-    uint32_t filetype;
-    uint32_t ncmds;
-    uint32_t sizeofcmds;
-    uint32_t flags;
-    uint32_t reserved;
-} mach_header_64;
-
-typedef struct {
-    uint32_t cmd;
-    uint32_t cmdsize;
-} load_command;
-
-#define LC_SEGMENT_64 0x19
-
-typedef struct {
-    uint32_t cmd;
-    uint32_t cmdsize;
-    char segname[16];
-    uint64_t vmaddr;
-    uint64_t vmsize;
-    uint64_t fileoff;
-    uint64_t filesize;
-    uint32_t maxprot;
-    uint32_t initprot;
-    uint32_t nsects;
-    uint32_t flags;
-} segment_command_64;
-
-#define CPU_TYPE_X86_64 0x01000007
-
-// PE/COFF (Windows) definitions
-#define IMAGE_NT_SIGNATURE 0x00004550  // 'PE\0\0'
-
-typedef struct {
-    uint16_t Machine;
-    uint16_t NumberOfSections;
-    uint32_t TimeDateStamp;
-    uint32_t PointerToSymbolTable;
-    uint32_t NumberOfSymbols;
-    uint16_t SizeOfOptionalHeader;
-    uint16_t Characteristics;
-} IMAGE_FILE_HEADER;
-
-typedef struct {
-    uint32_t VirtualSize;
-    uint32_t VirtualAddress;
-    uint32_t SizeOfRawData;
-    uint32_t PointerToRawData;
-    uint32_t PointerToRelocations;
-    uint32_t PointerToLinenumbers;
-    uint16_t NumberOfRelocations;
-    uint16_t NumberOfLinenumbers;
-    uint32_t Characteristics;
-} IMAGE_SECTION_HEADER;
+    uint64_t r_offset;
+    uint64_t r_info;
+    int64_t r_addend;
+} Elf64_Rela;
 
 // ELF constants
 #define ELFCLASS64 2
 #define ELFDATA2LSB 1
 #define EV_CURRENT 1
-#define ET_REL 1  // Relocatable file
+#define ET_REL 1
 #define EM_X86_64 62
 #define SHT_NULL 0
 #define SHT_PROGBITS 1
@@ -130,7 +75,7 @@ typedef struct {
 #define SHF_ALLOC 2
 #define SHF_EXECINSTR 4
 
-// Symbol information
+// Symbol info
 #define ELF64_ST_BIND(i) ((i)>>4)
 #define ELF64_ST_TYPE(i) ((i)&0xf)
 #define ELF64_ST_INFO(b,t) (((b)<<4)+((t)&0xf))
@@ -142,56 +87,40 @@ typedef struct {
 #define STT_SECTION 3
 #define STT_FILE 4
 
-// Relocation entry for x86-64
-typedef struct {
-    uint64_t r_offset;    // Address of the relocation
-    uint64_t r_info;      // Symbol index and type
-} Elf64_Rel;
-
-// Relocation entry with addend for x86-64
-typedef struct {
-    uint64_t r_offset;    // Address of the relocation
-    uint64_t r_info;      // Symbol index and type
-    int64_t  r_addend;    // Addend for relocation
-} Elf64_Rela;
-
-// Relocation types for x86-64
-#define R_X86_64_64 1     // Direct 64-bit reference
-#define R_X86_64_PC32 2   // PC-relative 32-bit reference
-#define R_X86_64_PLT32 4  // PLT 32-bit reference
-
-// ELF64 relocation info macros
+// Relocation
+#define R_X86_64_64 1
+#define R_X86_64_PC32 2
+#define R_X86_64_PLT32 4
 #define ELF64_R_SYM(i) ((i)>>32)
 #define ELF64_R_TYPE(i) ((i)&0xffffffffL)
 #define ELF64_R_INFO(s,t) ((((uint64_t)(s))<<32)+((t)&0xffffffffL))
 
-// Machine code generation for ELF output
+// === MACHINE CODE STRUCT ===
 typedef struct {
     uint8_t* code;
     size_t size;
     size_t capacity;
-    // Track relocation information
     Elf64_Rela* relocations;
     size_t reloc_count;
     size_t reloc_capacity;
 } MachineCode;
 
-// Section management structure
+// === ELF SECTION ===
 typedef struct {
-    char* name;           // Section name
-    uint32_t type;        // Section type
-    uint64_t flags;       // Section flags
-    uint64_t addr;        // Virtual address
-    uint64_t offset;      // File offset
-    uint64_t size;        // Section size
-    uint32_t link;        // Link to another section
-    uint32_t info;        // Additional section info
-    uint64_t addralign;   // Address alignment
-    uint64_t entsize;     // Entry size for table sections
-    uint8_t* data;        // Section data
+    char* name;
+    uint32_t type;
+    uint64_t flags;
+    uint64_t addr;
+    uint64_t offset;
+    uint64_t size;
+    uint32_t link;
+    uint32_t info;
+    uint64_t addralign;
+    uint64_t entsize;
+    uint8_t* data;
 } ElfSection;
 
-// ELF file structure
+// === ELF FILE ===
 typedef struct {
     Elf64_Ehdr header;
     ElfSection** sections;
@@ -203,47 +132,115 @@ typedef struct {
     int shstrtab_section_idx;
 } ELFFile;
 
+// === CORE FUNCTIONS ===
 MachineCode* init_machine_code();
 void free_machine_code(MachineCode* mc);
 int append_bytes(MachineCode* mc, const uint8_t* bytes, size_t len);
+
+// === STACK OPERATIONS ===
 int encode_push_rbp(MachineCode* mc);
+int encode_pop_rbp(MachineCode* mc);
+int encode_push_rax(MachineCode* mc);
+int encode_pop_rax(MachineCode* mc);
+int encode_push_rbx(MachineCode* mc);
+int encode_pop_rbx(MachineCode* mc);
+int encode_push_rcx(MachineCode* mc);
+int encode_pop_rcx(MachineCode* mc);
+int encode_push_rdx(MachineCode* mc);
+int encode_pop_rdx(MachineCode* mc);
+
+// === MOV OPERATIONS ===
 int encode_mov_rbp_rsp(MachineCode* mc);
-int encode_mov_rbp_rdi(MachineCode* mc);  // For function parameters
-int encode_mov_rdi_imm64(MachineCode* mc, uint64_t value);
-int encode_mov_rax_imm32(MachineCode* mc, int32_t value);
-int encode_mov_rbx_imm32(MachineCode* mc, int32_t value);
+int encode_mov_rsp_rbp(MachineCode* mc);
+int encode_mov_rbp_rdi(MachineCode* mc);
+int encode_mov_rax_imm32(MachineCode* mc, int32_t v);
+int encode_mov_rax_imm64(MachineCode* mc, int64_t v);
+int encode_mov_rbx_imm32(MachineCode* mc, int32_t v);
+int encode_mov_rcx_imm32(MachineCode* mc, int32_t v);
+int encode_mov_rdx_imm32(MachineCode* mc, int32_t v);
+int encode_mov_rdi_imm64(MachineCode* mc, uint64_t v);
+int encode_mov_rsi_imm64(MachineCode* mc, uint64_t v);
+int encode_mov_rax_rbx(MachineCode* mc);
+int encode_mov_rbx_rax(MachineCode* mc);
+int encode_mov_rcx_rax(MachineCode* mc);
+int encode_mov_rdi_rax(MachineCode* mc);
+int encode_mov_rsi_rax(MachineCode* mc);
+int encode_mov_rax_from_memory(MachineCode* mc, int off);
+int encode_mov_memory_from_rax(MachineCode* mc, int off);
+int encode_mov_rbx_from_memory(MachineCode* mc, int off);
+int encode_mov_memory_from_rbx(MachineCode* mc, int off);
+
+// === ARITHMETIC ===
 int encode_add_rax_rbx(MachineCode* mc);
+int encode_add_rax_imm32(MachineCode* mc, int32_t v);
 int encode_sub_rax_rbx(MachineCode* mc);
+int encode_sub_rax_imm32(MachineCode* mc, int32_t v);
+int encode_sub_rsp_imm8(MachineCode* mc, int8_t v);
+int encode_add_rsp_imm8(MachineCode* mc, int8_t v);
 int encode_mul_rbx(MachineCode* mc);
 int encode_div_rbx(MachineCode* mc);
-int encode_mov_rax_from_memory(MachineCode* mc, int offset_from_rbp);
-int encode_mov_memory_from_rax(MachineCode* mc, int offset_from_rbp);
-int encode_mov_rbx_from_memory(MachineCode* mc, int offset_from_rbp);
-int encode_mov_rcx_from_memory(MachineCode* mc, int offset_from_rbp);
-int encode_mov_rbx_from_rax(MachineCode* mc);
-int encode_mov_rcx_from_rax(MachineCode* mc);
-int encode_mov_rbx_from_rcx(MachineCode* mc);
-int encode_mov_rdi_from_rax(MachineCode* mc);
-int encode_mov_rsi_imm32(MachineCode* mc, int32_t value);
-int encode_mov_rax_from_rbx(MachineCode* mc);
-int encode_pop_rbp(MachineCode* mc);
-int encode_ret(MachineCode* mc);
+int encode_neg_rax(MachineCode* mc);
+int encode_not_rax(MachineCode* mc);
+
+// === COMPARISONS ===
+int encode_cmp_rax_rbx(MachineCode* mc);
+int encode_cmp_rax_imm32(MachineCode* mc, int32_t v);
+int encode_cmp_rax_zero(MachineCode* mc);
+int encode_test_rax_rax(MachineCode* mc);
+int encode_sete_al(MachineCode* mc);
+int encode_setne_al(MachineCode* mc);
+int encode_setl_al(MachineCode* mc);
+int encode_setg_al(MachineCode* mc);
+int encode_setle_al(MachineCode* mc);
+int encode_setge_al(MachineCode* mc);
+int encode_movzx_rax_al(MachineCode* mc);
+
+// === JUMPS ===
+int encode_jmp_rel32(MachineCode* mc, int32_t off);
+int encode_je_rel32(MachineCode* mc, int32_t off);
+int encode_jne_rel32(MachineCode* mc, int32_t off);
+int encode_jl_rel32(MachineCode* mc, int32_t off);
+int encode_jg_rel32(MachineCode* mc, int32_t off);
+int encode_jle_rel32(MachineCode* mc, int32_t off);
+int encode_jge_rel32(MachineCode* mc, int32_t off);
+int encode_jmp_rel8(MachineCode* mc, int8_t off);
+int encode_je_rel8(MachineCode* mc, int8_t off);
+int encode_jne_rel8(MachineCode* mc, int8_t off);
+
+// === CALL/RET ===
+int encode_call_rel32(MachineCode* mc, int32_t off);
 int encode_call_printf(MachineCode* mc);
 int encode_call_external(MachineCode* mc);
-int encode_mov_rax_from_rdi(MachineCode* mc);
-int encode_mov_rax_from_rsi(MachineCode* mc);
-int encode_mov_rax_from_rdx(MachineCode* mc);
-int encode_mov_rax_from_rcx(MachineCode* mc);
-int encode_mov_rax_from_r8(MachineCode* mc);
-int encode_mov_rax_from_r9(MachineCode* mc);
-int add_relocation_entry(MachineCode* mc, uint32_t sym_index, uint32_t type, int64_t addend);
+int encode_ret(MachineCode* mc);
+int encode_leave(MachineCode* mc);
 
-// ELF-related functions
+// === LOGICAL ===
+int encode_and_rax_rbx(MachineCode* mc);
+int encode_or_rax_rbx(MachineCode* mc);
+int encode_xor_rax_rax(MachineCode* mc);
+int encode_xor_rdx_rdx(MachineCode* mc);
+
+// === MISC ===
+int encode_nop(MachineCode* mc);
+int encode_syscall(MachineCode* mc);
+int encode_lea_rax_rip_rel(MachineCode* mc, int32_t off);
+int encode_lea_rdi_rip_rel(MachineCode* mc, int32_t off);
+int encode_lea_rsi_rip_rel(MachineCode* mc, int32_t off);
+
+// === RELOCATIONS ===
+int add_relocation_entry(MachineCode* mc, uint32_t sym, uint32_t type, int64_t add);
+
+// === LABEL MANAGEMENT ===
+int get_current_offset(MachineCode* mc);
+void patch_jump_offset(MachineCode* mc, int jump_pos, int target_pos);
+
+// === ELF FUNCTIONS ===
 ELFFile* init_elf_file();
 void free_elf_file(ELFFile* elf);
 int add_elf_section(ELFFile* elf, const char* name, uint32_t type, uint64_t flags);
-int write_complete_elf_file(ELFFile* elf, const char* filename);
 void create_text_section(ELFFile* elf, MachineCode* code);
+void create_data_section(ELFFile* elf, uint8_t* data, size_t size);
 void create_symbol_table(ELFFile* elf);
+int write_complete_elf_file(ELFFile* elf, const char* filename);
 
 #endif
