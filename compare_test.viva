@@ -1,0 +1,33 @@
+// Test comparison operators
+decreto a = 10;
+decreto b = 20;
+
+si (a < b) {
+    println("a < b: PASS");
+}
+
+si (a <= 10) {
+    println("a <= 10: PASS");
+}
+
+si (b >= 20) {
+    println("b >= 20: PASS");
+}
+
+si (a != b) {
+    println("a != b: PASS");
+}
+
+si (a == 10) {
+    println("a == 10: PASS");
+}
+
+// Combining in expressions
+decreto c = 5;
+si (c >= 1) {
+    si (c <= 10) {
+        println("1 <= c <= 10: PASS");
+    }
+}
+
+println("All comparison tests done!");

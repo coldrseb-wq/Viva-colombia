@@ -58,3 +58,14 @@ backup_*
 *_fixed.c
 *_fixed.s
 *_simplified.c
+
+# Test artifacts (generated C files and binaries)
+compare_test
+compare_test.c
+func_test
+func_test.c
+func_params_test
+func_params_test.c
+stress_out
+stress_out.c
+*.viva.c
