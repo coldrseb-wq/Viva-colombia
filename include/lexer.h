@@ -53,6 +53,12 @@ typedef enum {
     POTENCIA,       // Spanish for "power" - exponentiation
     RAIZ,           // Spanish for "root" - square root
     MODULO,         // Modulo operation
+    // Phase 7: Arrays, Structs, Dynamic Memory
+    ESTRUCTURA,     // Spanish for "struct" - structure declaration
+    RESERVAR,       // Spanish for "reserve/malloc" - memory allocation
+    LIBERAR,        // Spanish for "free" - memory deallocation
+    NUEVO,          // Spanish for "new" - create new instance
+    DOT,            // . for struct member access
     UNKNOWN
 } TokenType;
 

@@ -109,6 +109,11 @@ TokenStream* tokenize(const char* source) {
             else if (strcmp(buffer, "abs") == 0 || strcmp(buffer, "absoluto") == 0) type = ABSOLUTO;
             else if (strcmp(buffer, "pow") == 0 || strcmp(buffer, "potencia") == 0) type = POTENCIA;
             else if (strcmp(buffer, "sqrt") == 0 || strcmp(buffer, "raiz") == 0) type = RAIZ;
+            // Phase 7: Arrays, Structs, Dynamic Memory
+            else if (strcmp(buffer, "struct") == 0 || strcmp(buffer, "estructura") == 0) type = ESTRUCTURA;
+            else if (strcmp(buffer, "malloc") == 0 || strcmp(buffer, "reservar") == 0) type = RESERVAR;
+            else if (strcmp(buffer, "free") == 0 || strcmp(buffer, "liberar") == 0) type = LIBERAR;
+            else if (strcmp(buffer, "new") == 0 || strcmp(buffer, "nuevo") == 0) type = NUEVO;
 
             add_token(stream, init_token(type, buffer, line));
         }
@@ -194,6 +199,7 @@ TokenStream* tokenize(const char* source) {
                 case ',': type = COMMA; break;
                 case '[': type = LBRACKET; break;
                 case ']': type = RBRACKET; break;
+                case '.': type = DOT; break;
                 default: type = UNKNOWN; break;
             }
 

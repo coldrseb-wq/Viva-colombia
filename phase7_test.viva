@@ -1,0 +1,51 @@
+// Phase 7 Test - Arrays, Structs, Dynamic Memory
+// Testing new Viva language features
+
+println("=== Phase 7 Test: Arrays, Structs, Dynamic Memory ===");
+
+// Test 1: Array declaration with size
+println("Test 1: Array with size");
+decreto numeros[5];
+numeros[0] = 10;
+numeros[1] = 20;
+numeros[2] = 30;
+println("Array elements assigned");
+
+// Test 2: Array with initialization
+println("Test 2: Array with initialization");
+decreto valores = [1, 2, 3, 4, 5];
+println("Array initialized with values");
+
+// Test 3: Array access
+println("Test 3: Array access");
+decreto primero = valores[0];
+println(primero);
+decreto segundo = valores[1];
+println(segundo);
+
+// Test 4: Struct declaration
+println("Test 4: Struct declaration");
+estructura Persona {
+    edad;
+    altura;
+}
+
+// Test 5: Struct instance
+println("Test 5: Struct instance");
+nuevo Persona juan;
+juan.edad = 25;
+juan.altura = 180;
+println("Struct fields assigned");
+
+// Test 6: Member access
+println("Test 6: Member access");
+decreto edad_juan = juan.edad;
+println(edad_juan);
+
+// Test 7: Dynamic memory allocation
+println("Test 7: Dynamic memory");
+decreto ptr = reservar(100);
+liberar(ptr);
+println("Memory allocated and freed");
+
+println("=== Phase 7 Test Complete ===");

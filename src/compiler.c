@@ -445,6 +445,41 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             emit(c, ")");
         }
     }
+    // Phase 7: Arrays, Structs, Dynamic Memory expressions
+    else if (n->type == ARRAY_ACCESS_NODE) {
+        if (c->mode == OUT_C) {
+            emit(c, "%s[", n->value);
+            compile_expr(c, n->left);  // index
+            emit(c, "]");
+        }
+    }
+    else if (n->type == ARRAY_INIT_NODE) {
+        if (c->mode == OUT_C) {
+            emit(c, "{");
+            ASTNode* elem = n->left;
+            int first = 1;
+            while (elem) {
+                if (!first) emit(c, ", ");
+                compile_expr(c, elem);
+                first = 0;
+                elem = elem->next;
+            }
+            emit(c, "}");
+        }
+    }
+    else if (n->type == MEMBER_ACCESS_NODE) {
+        if (c->mode == OUT_C) {
+            emit(c, "%s.", n->value);  // object name
+            if (n->left) emit(c, "%s", n->left->value);  // field name
+        }
+    }
+    else if (n->type == MALLOC_NODE) {
+        if (c->mode == OUT_C) {
+            emit(c, "malloc(");
+            compile_expr(c, n->left);  // size
+            emit(c, ")");
+        }
+    }
 }
 // === FUNCTION CALL ===
 static void compile_call(Compiler* c, ASTNode* n) {
@@ -570,13 +605,18 @@ static void compile_call(Compiler* c, ASTNode* n) {
 static void compile_var(Compiler* c, ASTNode* n, int spanish) {
     if (!n || !n->value) return;
     int is_str = 0;
-    
+
     if (c->mode == OUT_C) {
         indent(c);
         if (n->left && (n->left->type == STRING_LITERAL_NODE ||
             (n->left->type == IDENTIFIER_NODE && n->left->value[0]=='"'))) {
             emit(c, "char* %s = %s;\n", n->value, n->left->value);
             is_str = 1;
+        } else if (n->left && n->left->type == MALLOC_NODE) {
+            // Memory allocation returns void*
+            emit(c, "void* %s = ", n->value);
+            compile_expr(c, n->left);
+            emit(c, ";\n");
         } else if (n->left) {
             emit(c, "int %s = ", n->value);
             compile_expr(c, n->left);
@@ -626,12 +666,37 @@ static void compile_var(Compiler* c, ASTNode* n, int spanish) {
 // === ASSIGNMENT ===
 static void compile_assign(Compiler* c, ASTNode* n) {
     if (!n || !n->value || !n->left) return;
-    
+
     if (c->mode == OUT_C) {
         indent(c);
-        emit(c, "%s = ", n->value);
-        compile_expr(c, n->left);
-        emit(c, ";\n");
+        // Check for array element or member assignment (extra field set)
+        if (n->extra) {
+            if (n->extra->type == ARRAY_ACCESS_NODE) {
+                // Array element assignment: arr[index] = value;
+                emit(c, "%s[", n->value);
+                compile_expr(c, n->extra->left);  // index
+                emit(c, "] = ");
+                compile_expr(c, n->left);  // value
+                emit(c, ";\n");
+            } else if (n->extra->type == MEMBER_ACCESS_NODE) {
+                // Member assignment: obj.field = value;
+                emit(c, "%s.", n->value);
+                if (n->extra->left) emit(c, "%s", n->extra->left->value);  // field
+                emit(c, " = ");
+                compile_expr(c, n->left);  // value
+                emit(c, ";\n");
+            } else {
+                // Fallback to simple assignment
+                emit(c, "%s = ", n->value);
+                compile_expr(c, n->left);
+                emit(c, ";\n");
+            }
+        } else {
+            // Simple assignment
+            emit(c, "%s = ", n->value);
+            compile_expr(c, n->left);
+            emit(c, ";\n");
+        }
     }
     else if (c->mode == OUT_ASM) {
         int off = get_var_off(c, n->value);
@@ -1006,15 +1071,100 @@ static void compile_node(Compiler* c, ASTNode* n) {
                     emit(c, ");\n");
                 }
                 break;
+            // Phase 7: Arrays, Structs, Dynamic Memory
+            case ARRAY_DECL_NODE:
+                if (c->mode == OUT_C) {
+                    indent(c);
+                    if (n->left) {
+                        // Array with size: int arr[10];
+                        emit(c, "int %s[", n->value);
+                        compile_expr(c, n->left);
+                        emit(c, "];\n");
+                    } else if (n->right && n->right->type == ARRAY_INIT_NODE) {
+                        // Array with initialization: int arr[] = {1, 2, 3};
+                        emit(c, "int %s[] = ", n->value);
+                        compile_expr(c, n->right);
+                        emit(c, ";\n");
+                    } else {
+                        // Simple array declaration
+                        emit(c, "int %s[];\n", n->value);
+                    }
+                }
+                break;
+            case STRUCT_DECL_NODE:
+                if (c->mode == OUT_C) {
+                    indent(c);
+                    emit(c, "typedef struct {\n");
+                    c->indent++;
+                    ASTNode* field = n->left;
+                    while (field) {
+                        indent(c);
+                        emit(c, "int %s;\n", field->value);  // Default to int fields
+                        field = field->next;
+                    }
+                    c->indent--;
+                    indent(c);
+                    emit(c, "} %s;\n", n->value);
+                }
+                break;
+            case STRUCT_INST_NODE:
+                if (c->mode == OUT_C) {
+                    indent(c);
+                    if (n->extra) {
+                        emit(c, "%s %s;\n", n->extra->value, n->value);  // TypeName varName;
+                    } else {
+                        emit(c, "void* %s;\n", n->value);  // Fallback
+                    }
+                }
+                break;
+            case MALLOC_NODE:
+                if (c->mode == OUT_C) {
+                    indent(c);
+                    emit(c, "malloc(");
+                    compile_expr(c, n->left);
+                    emit(c, ");\n");
+                }
+                break;
+            case FREE_NODE:
+                if (c->mode == OUT_C) {
+                    indent(c);
+                    emit(c, "free(");
+                    compile_expr(c, n->left);
+                    emit(c, ");\n");
+                }
+                break;
             default: break;
         }
         n = n->next;  // Use next for statement chaining
     }
 }
 
-// Helper to check if node is a function declaration
+// Helper to check if node is a function or struct declaration
 static int is_func_decl(ASTNode* n) {
     return n && (n->type == FN_DECL_NODE || n->type == FN_DECL_SPANISH_NODE);
+}
+
+// Helper to check if node is a struct declaration
+static int is_struct_decl(ASTNode* n) {
+    return n && n->type == STRUCT_DECL_NODE;
+}
+
+// Compile structs first (before functions and main)
+static void compile_structs(Compiler* c, ASTNode* ast) {
+    if (!ast) return;
+    if (ast->type == PROGRAM_NODE) {
+        ASTNode* n = ast->left;
+        while (n) {
+            if (is_struct_decl(n)) {
+                // Temporarily stop next-chain traversal
+                ASTNode* save_next = n->next;
+                n->next = NULL;
+                compile_node(c, n);
+                n->next = save_next;
+            }
+            n = n->next;
+        }
+    }
 }
 
 // Compile functions first (before main)
@@ -1037,7 +1187,7 @@ static void compile_statements(Compiler* c, ASTNode* ast) {
     if (ast->type == PROGRAM_NODE) {
         ASTNode* n = ast->left;
         while (n) {
-            if (!is_func_decl(n)) {
+            if (!is_func_decl(n) && !is_struct_decl(n)) {
                 // Temporarily stop next-chain traversal since we're iterating manually
                 ASTNode* save_next = n->next;
                 n->next = NULL;
@@ -1053,7 +1203,10 @@ static void compile_statements(Compiler* c, ASTNode* ast) {
 
 // === MAIN WRAPPER ===
 static void compile_main(Compiler* c, ASTNode* ast) {
-    // First pass: compile all function declarations
+    // First pass: compile all struct declarations (before functions)
+    compile_structs(c, ast);
+
+    // Second pass: compile all function declarations
     compile_functions(c, ast);
 
     // Then wrap non-function statements in main

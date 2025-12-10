@@ -40,7 +40,14 @@ typedef enum {
     CONCAT_NODE,            // String concatenation
     ABS_NODE,               // Absolute value
     POW_NODE,               // Power/exponentiation
-    SQRT_NODE               // Square root
+    SQRT_NODE,              // Square root
+    // Phase 7: Arrays, Structs, Dynamic Memory
+    ARRAY_INIT_NODE,        // Array initialization with values
+    STRUCT_DECL_NODE,       // Struct type declaration
+    STRUCT_INST_NODE,       // Struct instance declaration
+    MEMBER_ACCESS_NODE,     // Struct member access (obj.field)
+    MALLOC_NODE,            // Memory allocation
+    FREE_NODE               // Memory deallocation
 } NodeType;
 
 typedef struct ASTNode {

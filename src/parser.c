@@ -24,7 +24,7 @@ void free_ast_node(ASTNode* node) {
 
         // Only proceed with freeing if the type looks valid
         // This prevents freeing corrupted memory structures
-        if (type >= PROGRAM_NODE && type <= SQRT_NODE) {
+        if (type >= PROGRAM_NODE && type <= FREE_NODE) {
             // To handle potential circular references, set pointers to NULL before freeing
             // to avoid accessing memory after it's freed
             ASTNode* left = node->left;
@@ -270,6 +270,26 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
                     fprintf(stderr, "Error: Expected ']' at line %d\n", current_token->line);
                 }
             }
+            // Check for member access: identifier.field
+            else if (*pos < tokens->count && tokens->tokens[*pos]->type == DOT) {
+                // Transform from IDENTIFIER_NODE to MEMBER_ACCESS_NODE
+                char* obj_name = strdup(node->value);
+                free_ast_node(node); // Free the temporary identifier node
+                node = init_ast_node(MEMBER_ACCESS_NODE);
+                node->value = obj_name; // object name
+
+                (*pos)++; // skip '.'
+
+                // Expect field name identifier
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == IDENTIFIER) {
+                    ASTNode* field = init_ast_node(IDENTIFIER_NODE);
+                    field->value = strdup(tokens->tokens[*pos]->value);
+                    node->left = field; // field name
+                    (*pos)++;
+                } else {
+                    fprintf(stderr, "Error: Expected field name after '.' at line %d\n", current_token->line);
+                }
+            }
 
             // Check and consume semicolon if present after identifier/array access (in case of variable usage without assignment)
             if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
@@ -284,6 +304,50 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
         // Expect closing parenthesis
         if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
             (*pos)++; // skip ')'
+        }
+    }
+    else if (current_token->type == LBRACKET) {
+        // Handle array initialization: [1, 2, 3, ...]
+        (*pos)++; // skip '['
+        node = init_ast_node(ARRAY_INIT_NODE);
+
+        ASTNode* current_elem = NULL;
+        while (*pos < tokens->count && tokens->tokens[*pos]->type != RBRACKET) {
+            ASTNode* elem = parse_expression(tokens, pos);
+            if (elem != NULL) {
+                if (node->left == NULL) {
+                    node->left = elem;
+                    current_elem = elem;
+                } else {
+                    current_elem->next = elem;
+                    current_elem = elem;
+                }
+            }
+
+            // Skip comma if present
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == COMMA) {
+                (*pos)++;
+            } else {
+                break;
+            }
+        }
+
+        // Expect closing bracket
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACKET) {
+            (*pos)++; // skip ']'
+        }
+    }
+    // Handle reservar (malloc) as expression
+    else if (current_token->type == RESERVAR) {
+        (*pos)++; // skip 'reservar'
+        node = init_ast_node(MALLOC_NODE);
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++; // skip '('
+            node->left = parse_expression(tokens, pos); // size
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
         }
     }
 
@@ -386,6 +450,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
 
     if (current_token->type == LET || current_token->type == DECRETO) {
         // Handle variable declaration with assignment: decreto var = value;
+        // Also handles array declaration: decreto arr[10]; or decreto arr = [1, 2, 3];
         (*pos)++; // skip 'let' or 'decreto'
 
         // Expect an identifier (variable name)
@@ -393,21 +458,50 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
             char* var_name = strdup(tokens->tokens[*pos]->value);
             (*pos)++; // skip identifier
 
+            // Check for array declaration with size: decreto arr[10];
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACKET) {
+                (*pos)++; // skip '['
+
+                // Parse the size expression
+                ASTNode* size_expr = parse_expression(tokens, pos);
+
+                // Expect closing bracket
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACKET) {
+                    (*pos)++; // skip ']'
+                }
+
+                // Create array declaration node
+                node = init_ast_node(ARRAY_DECL_NODE);
+                node->value = var_name;  // array name
+                node->left = size_expr;  // array size
+
+                // Check and consume semicolon if present
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                    (*pos)++; // skip semicolon
+                }
+            }
             // Expect assignment operator
-            if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+            else if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
                 (*pos)++; // skip assignment operator
 
                 // Parse the expression to be assigned
                 ASTNode* value_expr = parse_expression(tokens, pos);
 
-                // Create assignment node
-                if (current_token->type == DECRETO) {
-                    node = init_ast_node(VAR_DECL_SPANISH_NODE);  // Spanish node type for variable declaration
+                // Check if it's an array initialization
+                if (value_expr != NULL && value_expr->type == ARRAY_INIT_NODE) {
+                    node = init_ast_node(ARRAY_DECL_NODE);
+                    node->value = var_name;
+                    node->right = value_expr; // array initialization values
                 } else {
-                    node = init_ast_node(VAR_DECL_NODE);  // English node type
+                    // Create assignment node
+                    if (current_token->type == DECRETO) {
+                        node = init_ast_node(VAR_DECL_SPANISH_NODE);  // Spanish node type for variable declaration
+                    } else {
+                        node = init_ast_node(VAR_DECL_NODE);  // English node type
+                    }
+                    node->value = var_name;  // variable name
+                    node->left = value_expr; // value to assign
                 }
-                node->value = var_name;  // variable name
-                node->left = value_expr; // value to assign
 
                 // Check and consume semicolon if present
                 if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
@@ -421,7 +515,6 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                     node = init_ast_node(VAR_DECL_NODE);
                 }
                 node->value = var_name;
-                free(var_name);
 
                 // Check and consume semicolon if present
                 if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
@@ -961,10 +1054,190 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
             (*pos)++;
         }
         return node;
+    } else if (current_token->type == ESTRUCTURA) {
+        // Handle struct declaration: estructura Nombre { campo1; campo2; }
+        (*pos)++; // skip 'estructura'
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == IDENTIFIER) {
+            char* struct_name = strdup(tokens->tokens[*pos]->value);
+            (*pos)++; // skip struct name
+
+            node = init_ast_node(STRUCT_DECL_NODE);
+            node->value = struct_name;
+
+            // Expect opening brace
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACE) {
+                (*pos)++; // skip '{'
+
+                // Parse field names as linked list of identifiers
+                ASTNode* current_field = NULL;
+
+                while (*pos < tokens->count && tokens->tokens[*pos]->type != RBRACE) {
+                    if (tokens->tokens[*pos]->type == IDENTIFIER) {
+                        ASTNode* field = init_ast_node(IDENTIFIER_NODE);
+                        field->value = strdup(tokens->tokens[*pos]->value);
+                        (*pos)++;
+
+                        if (node->left == NULL) {
+                            node->left = field;
+                            current_field = field;
+                        } else {
+                            current_field->next = field;
+                            current_field = field;
+                        }
+                    }
+
+                    // Skip semicolon between fields
+                    if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                        (*pos)++;
+                    }
+                }
+
+                // Skip closing brace
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACE) {
+                    (*pos)++;
+                }
+            }
+
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                (*pos)++;
+            }
+            return node;
+        }
+    } else if (current_token->type == NUEVO) {
+        // Handle struct instance creation: nuevo Nombre var_name;
+        (*pos)++; // skip 'nuevo'
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == IDENTIFIER) {
+            char* type_name = strdup(tokens->tokens[*pos]->value);
+            (*pos)++; // skip type name
+
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == IDENTIFIER) {
+                char* var_name = strdup(tokens->tokens[*pos]->value);
+                (*pos)++; // skip variable name
+
+                node = init_ast_node(STRUCT_INST_NODE);
+                node->value = var_name;  // variable name
+                // Store type name in extra as identifier node
+                ASTNode* type_node = init_ast_node(IDENTIFIER_NODE);
+                type_node->value = type_name;
+                node->extra = type_node;
+
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                    (*pos)++;
+                }
+                return node;
+            } else {
+                free(type_name);
+            }
+        }
+    } else if (current_token->type == LIBERAR) {
+        // Handle memory deallocation: liberar(ptr);
+        (*pos)++; // skip 'liberar'
+
+        node = init_ast_node(FREE_NODE);
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++; // skip '('
+            node->left = parse_expression(tokens, pos); // pointer to free
+
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+            (*pos)++;
+        }
+        return node;
     } else if (current_token->type == IDENTIFIER) {
         // Handle assignment statements: identifier = expression;
+        // Also handles: arr[index] = value; and obj.field = value;
         int next_pos = *pos + 1;
-        if (next_pos < tokens->count && tokens->tokens[next_pos]->type == ASSIGN) {
+
+        // Check for array element assignment: arr[index] = value;
+        if (next_pos < tokens->count && tokens->tokens[next_pos]->type == LBRACKET) {
+            char* arr_name = strdup(tokens->tokens[*pos]->value);
+            (*pos)++; // skip identifier
+            (*pos)++; // skip '['
+
+            // Parse the index expression
+            ASTNode* index_expr = parse_expression(tokens, pos);
+
+            // Expect closing ']'
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACKET) {
+                (*pos)++; // skip ']'
+            }
+
+            // Now expect '='
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+                (*pos)++; // skip '='
+
+                ASTNode* value_expr = parse_expression(tokens, pos);
+
+                // Create array assignment node
+                node = init_ast_node(ASSIGN_NODE);
+                node->value = arr_name;
+
+                // Store index in extra
+                ASTNode* index_node = init_ast_node(ARRAY_ACCESS_NODE);
+                index_node->value = strdup(arr_name);
+                index_node->left = index_expr;
+                node->extra = index_node;  // marks this as array assignment
+                node->left = value_expr;
+
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                    (*pos)++;
+                }
+                return node;
+            } else {
+                free(arr_name);
+            }
+        }
+        // Check for member assignment: obj.field = value;
+        else if (next_pos < tokens->count && tokens->tokens[next_pos]->type == DOT) {
+            char* obj_name = strdup(tokens->tokens[*pos]->value);
+            (*pos)++; // skip identifier
+            (*pos)++; // skip '.'
+
+            // Expect field name
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == IDENTIFIER) {
+                char* field_name = strdup(tokens->tokens[*pos]->value);
+                (*pos)++; // skip field name
+
+                // Now expect '='
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+                    (*pos)++; // skip '='
+
+                    ASTNode* value_expr = parse_expression(tokens, pos);
+
+                    // Create member assignment node
+                    node = init_ast_node(ASSIGN_NODE);
+                    node->value = obj_name;
+
+                    // Store field in extra
+                    ASTNode* member_node = init_ast_node(MEMBER_ACCESS_NODE);
+                    member_node->value = strdup(obj_name);
+                    ASTNode* field_node = init_ast_node(IDENTIFIER_NODE);
+                    field_node->value = field_name;
+                    member_node->left = field_node;
+                    node->extra = member_node;  // marks this as member assignment
+                    node->left = value_expr;
+
+                    if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                        (*pos)++;
+                    }
+                    return node;
+                } else {
+                    free(obj_name);
+                    free(field_name);
+                }
+            } else {
+                free(obj_name);
+            }
+        }
+        // Simple assignment: identifier = expression;
+        else if (next_pos < tokens->count && tokens->tokens[next_pos]->type == ASSIGN) {
             char* var_name = strdup(tokens->tokens[*pos]->value);
             (*pos) += 2; // skip identifier and assignment operator
 
