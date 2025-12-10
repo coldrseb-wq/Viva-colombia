@@ -141,6 +141,7 @@ TokenStream* tokenize(const char* source) {
                 case '-': type = MINUS; break;
                 case '*': type = MULTIPLY; break;
                 case '/': type = DIVIDE; break;
+                case '%': type = MODULO; break;
                 case '=':
                     if (*(current + 1) == '=') {
                         current++; // Skip next '='

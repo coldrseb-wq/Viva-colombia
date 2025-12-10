@@ -12,6 +12,7 @@ typedef enum {
     MINUS,
     MULTIPLY,
     DIVIDE,
+    MODULO,         // For % operator
     ASSIGN,         // For = in variable assignment
     EQUALITY,       // For == operator
     NOT_EQUAL,      // For != operator

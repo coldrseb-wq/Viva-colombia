@@ -391,16 +391,26 @@ static void compile_expr(Compiler* c, ASTNode* n) {
         // Function call in expression - emit call and return value is in rax
         const char* fn = n->value;
         if (c->mode == OUT_C) {
-            emit(c, "%s(", fn);
-            ASTNode* arg = n->left;
-            int first = 1;
-            while (arg) {
-                if (!first) emit(c, ", ");
-                compile_expr(c, arg);
-                first = 0;
-                arg = arg->right;
+            // Built-in functions
+            if (strcmp(fn, "len") == 0 || strcmp(fn, "largo") == 0) {
+                // String length function
+                emit(c, "(int)strlen(");
+                if (n->left) compile_expr(c, n->left);
+                emit(c, ")");
             }
-            emit(c, ")");
+            else {
+                // User-defined function call
+                emit(c, "%s(", fn);
+                ASTNode* arg = n->left;
+                int first = 1;
+                while (arg) {
+                    if (!first) emit(c, ", ");
+                    compile_expr(c, arg);
+                    first = 0;
+                    arg = arg->right;
+                }
+                emit(c, ")");
+            }
         }
         else if (c->mode == OUT_ASM) {
             // For user-defined functions, call them - return value will be in rax
