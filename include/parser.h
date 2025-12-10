@@ -47,7 +47,12 @@ typedef enum {
     STRUCT_INST_NODE,       // Struct instance declaration
     MEMBER_ACCESS_NODE,     // Struct member access (obj.field)
     MALLOC_NODE,            // Memory allocation
-    FREE_NODE               // Memory deallocation
+    FREE_NODE,              // Memory deallocation
+    // Bootstrap support nodes
+    ORD_NODE,               // ord(c) - character to ASCII code
+    CHR_NODE,               // chr(n) - ASCII code to character
+    ITOA_NODE,              // itoa(n) - integer to string
+    WRITE_BYTE_NODE         // escribir_byte(f, byte) - write single byte
 } NodeType;
 
 typedef struct ASTNode {

@@ -1,0 +1,7 @@
+// Simple function test
+funcion saludar(x) {
+    println("Hola!");
+}
+
+saludar(1);
+println("Done");

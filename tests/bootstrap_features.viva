@@ -1,0 +1,34 @@
+// Test bootstrap features
+println("=== Testing Bootstrap Features ===");
+
+// Test ord() - character to ASCII
+decreto str = "Hello";
+decreto ch = str[0];
+println("str[0] ASCII code:");
+println(ch);
+
+// Test chr() - ASCII to character
+decreto code = 65;
+decreto c = chr(code);
+println("chr(65):");
+// For now just print the code since we don't have char printing yet
+
+// Test itoa() - integer to string
+decreto num = 12345;
+decreto numstr = itoa(num);
+println("itoa(12345):");
+println(numstr);
+
+// Test byte-level file write
+archivo f;
+f = abrir("byte_test.bin", "w");
+escribir_byte(f, 72);
+escribir_byte(f, 101);
+escribir_byte(f, 108);
+escribir_byte(f, 108);
+escribir_byte(f, 111);
+escribir_byte(f, 10);
+cerrar(f);
+println("Wrote 'Hello' to byte_test.bin");
+
+println("=== Bootstrap Features Test Complete ===");

@@ -1,0 +1,100 @@
+// Mini Lexer v3 - Simplified Bootstrap Test
+println("=== Mini Lexer ===");
+
+decreto source = "decreto x = 42";
+decreto pos = 0;
+decreto len = longitud(source);
+
+println("Source:");
+println(source);
+println("Length:");
+println(len);
+
+// Helper functions
+funcion is_alpha(c) {
+    si (c >= 65) {
+        si (c <= 90) { retorno 1; }
+    }
+    si (c >= 97) {
+        si (c <= 122) { retorno 1; }
+    }
+    si (c == 95) { retorno 1; }
+    retorno 0;
+}
+
+funcion is_digit(c) {
+    si (c >= 48) {
+        si (c <= 57) { retorno 1; }
+    }
+    retorno 0;
+}
+
+funcion is_space(c) {
+    si (c == 32) { retorno 1; }
+    retorno 0;
+}
+
+// Tokenize loop
+decreto token_count = 0;
+mientras (pos < len) {
+    // Skip whitespace
+    decreto ch = source[pos];
+    si (is_space(ch)) {
+        pos = pos + 1;
+        continuar;
+    }
+
+    // Identifier
+    si (is_alpha(ch)) {
+        print("ID: ");
+        mientras (pos < len) {
+            ch = source[pos];
+            si (is_alpha(ch) == 0) {
+                si (is_digit(ch) == 0) {
+                    romper;
+                }
+            }
+            decreto c = source[pos];
+            // Print using itoa for now (just print ASCII code)
+            prtnum(c);
+            prt(" ");
+            pos = pos + 1;
+        }
+        println("");
+        token_count = token_count + 1;
+        continuar;
+    }
+
+    // Number
+    si (is_digit(ch)) {
+        print("NUM: ");
+        mientras (pos < len) {
+            ch = source[pos];
+            si (is_digit(ch) == 0) {
+                romper;
+            }
+            decreto c = source[pos];
+            prtnum(c);
+            prt(" ");
+            pos = pos + 1;
+        }
+        println("");
+        token_count = token_count + 1;
+        continuar;
+    }
+
+    // Equal sign
+    si (ch == 61) {
+        println("OP: =");
+        pos = pos + 1;
+        token_count = token_count + 1;
+        continuar;
+    }
+
+    // Unknown - skip
+    pos = pos + 1;
+}
+
+println("Tokens:");
+println(token_count);
+println("=== Done ===");

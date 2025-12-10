@@ -29,6 +29,7 @@ typedef enum {
     DECRETO,        // Spanish for "decree" - Colombian historical reference
     FN,
     CANCION,        // Spanish for "song" - cultural reference
+    FUNCION,        // Spanish for "function" - function declaration
     SI,             // Spanish for "if"
     SINO,           // Spanish for "else"
     MIENTRAS,       // Spanish for "while"
@@ -55,6 +56,11 @@ typedef enum {
     POTENCIA,       // Spanish for "power" - exponentiation
     RAIZ,           // Spanish for "root" - square root
     MODULO,         // Modulo operation
+    // Bootstrap support tokens
+    ORD,            // ord(c) - character to ASCII code
+    CHR,            // chr(n) - ASCII code to character
+    ITOA,           // itoa(n) - integer to string
+    ESCRIBIR_BYTE,  // escribir_byte(f, byte) - write single byte to file
     // Phase 7: Arrays, Structs, Dynamic Memory
     ESTRUCTURA,     // Spanish for "struct" - structure declaration
     RESERVAR,       // Spanish for "reserve/malloc" - memory allocation

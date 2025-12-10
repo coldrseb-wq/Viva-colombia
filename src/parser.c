@@ -351,6 +351,58 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
             }
         }
     }
+    // Bootstrap support: ord(c) - character to ASCII
+    else if (current_token->type == ORD) {
+        (*pos)++;
+        node = init_ast_node(ORD_NODE);
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++;
+            node->left = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+    }
+    // Bootstrap support: chr(n) - ASCII to character
+    else if (current_token->type == CHR) {
+        (*pos)++;
+        node = init_ast_node(CHR_NODE);
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++;
+            node->left = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+    }
+    // Bootstrap support: itoa(n) - integer to string
+    else if (current_token->type == ITOA) {
+        (*pos)++;
+        node = init_ast_node(ITOA_NODE);
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++;
+            node->left = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+    }
+    // Bootstrap support: escribir_byte(f, byte) - write single byte to file
+    else if (current_token->type == ESCRIBIR_BYTE) {
+        (*pos)++;
+        node = init_ast_node(WRITE_BYTE_NODE);
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++;
+            node->left = parse_expression(tokens, pos);  // file
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == COMMA) {
+                (*pos)++;
+                node->right = parse_expression(tokens, pos);  // byte value
+            }
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+    }
 
     return node;
 }
@@ -784,9 +836,9 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                 }
             }
         }
-    } else if (current_token->type == FN || current_token->type == CANCION) {
-        // Handle function declarations: fn name(params) { body } or cancion name(params) { body }
-        int is_spanish = (current_token->type == CANCION);
+    } else if (current_token->type == FN || current_token->type == CANCION || current_token->type == FUNCION) {
+        // Handle function declarations: fn name(params) { body } or cancion/funcion name(params) { body }
+        int is_spanish = (current_token->type == CANCION || current_token->type == FUNCION);
         (*pos)++; // skip 'fn' or 'cancion'
 
         // Expect function name (identifier)

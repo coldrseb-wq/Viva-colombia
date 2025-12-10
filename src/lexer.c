@@ -92,6 +92,7 @@ TokenStream* tokenize(const char* source) {
             // Check if it's a keyword
             if (strcmp(buffer, "let") == 0 || strcmp(buffer, "decreto") == 0) type = DECRETO;
             else if (strcmp(buffer, "fn") == 0 || strcmp(buffer, "cancion") == 0) type = CANCION;
+            else if (strcmp(buffer, "funcion") == 0) type = FUNCION;
             else if (strcmp(buffer, "if") == 0 || strcmp(buffer, "si") == 0) type = SI;
             else if (strcmp(buffer, "else") == 0 || strcmp(buffer, "sino") == 0) type = SINO;
             else if (strcmp(buffer, "while") == 0 || strcmp(buffer, "mientras") == 0) type = MIENTRAS;
@@ -114,6 +115,11 @@ TokenStream* tokenize(const char* source) {
             else if (strcmp(buffer, "malloc") == 0 || strcmp(buffer, "reservar") == 0) type = RESERVAR;
             else if (strcmp(buffer, "free") == 0 || strcmp(buffer, "liberar") == 0) type = LIBERAR;
             else if (strcmp(buffer, "new") == 0 || strcmp(buffer, "nuevo") == 0) type = NUEVO;
+            // Bootstrap support keywords
+            else if (strcmp(buffer, "ord") == 0) type = ORD;
+            else if (strcmp(buffer, "chr") == 0) type = CHR;
+            else if (strcmp(buffer, "itoa") == 0 || strcmp(buffer, "a_cadena") == 0) type = ITOA;
+            else if (strcmp(buffer, "escribir_byte") == 0 || strcmp(buffer, "write_byte") == 0) type = ESCRIBIR_BYTE;
 
             add_token(stream, init_token(type, buffer, line));
         }
