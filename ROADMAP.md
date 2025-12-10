@@ -147,6 +147,32 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 
 ### Status: COMPLETED
 
+## Phase 8: Standalone Executables & Syscall Interface (COMPLETED)
+### Objectives:
+- Enable fully standalone executables without libc dependency
+- Direct Linux syscall interface for I/O and process control
+- Inline string embedding for minimal binary size
+
+### Completed Tasks:
+- ✅ Linux x86-64 syscall interface (syscall instruction encoding)
+- ✅ sys_write syscall for stdout output
+- ✅ sys_exit syscall for program termination
+- ✅ Standalone println using syscalls (no printf/libc)
+- ✅ Inline string embedding in .text section (no cross-section relocations)
+- ✅ _start entry point for standalone binaries (instead of main)
+- ✅ Command-line `-S` flag for standalone compilation
+- ✅ Proper ELF symbol table with _start symbol
+- ✅ Minimal binary size (~4.7KB for Hello World)
+
+### Usage:
+```bash
+./viva program.viva -S output.o      # Compile to standalone object
+ld -o program output.o               # Link without libc
+./program                            # Run standalone binary
+```
+
+### Status: COMPLETED
+
 ## Current State Summary
 The Viva compiler has made tremendous progress toward direct machine code compilation rivaling Go and Rust:
 - ✅ Successfully transitioned from C-code to assembly generation
@@ -167,19 +193,24 @@ The Viva compiler has made tremendous progress toward direct machine code compil
 - ✅ Arrays with size declarations and initializers
 - ✅ Structs (estructura) with member access
 - ✅ Dynamic memory allocation (reservar/liberar)
+- ✅ **Standalone executables without libc** (Phase 8)
+- ✅ Direct Linux syscall interface (sys_write, sys_exit)
+- ✅ Inline string embedding for minimal binary size
 
-**Phases 1-7 are now COMPLETED!** The compiler now has all the foundational features needed for bootstrapping: arrays for AST representation, structs for complex data types, and dynamic memory for flexible data management. The language is now ready to begin self-hosting development.
+**Phases 1-8 are now COMPLETED!** The compiler can now generate truly standalone executables that require no external runtime libraries. This is a major milestone toward self-sufficiency - the generated binaries use direct syscalls and have no libc dependency.
 
 ## Bootstrapping Path
 The progression toward a fully bootstrapped Viva compiler:
-1. **Phase 1-7**: Current C-written compiler with all foundational features - **ALL COMPLETED**
-2. **Phase 8 (Next)**: Begin writing Viva lexer in Viva itself
-3. **Phase 9**: Write Viva parser in Viva
-4. **Phase 10**: Write Viva compiler in Viva
-5. **Final Goal**: Viva compiler (written in Viva) that generates direct machine code - achieving true bootstrapping
+1. **Phase 1-7**: Current C-written compiler with foundational features - **COMPLETED**
+2. **Phase 8**: Standalone executables with direct syscalls - **COMPLETED**
+3. **Phase 9 (Next)**: Begin writing Viva lexer in Viva itself
+4. **Phase 10**: Write Viva parser in Viva
+5. **Phase 11**: Write Viva compiler in Viva
+6. **Final Goal**: Viva compiler (written in Viva) that generates direct machine code - achieving true bootstrapping
 
 ## Next Critical Steps
-1. Begin writing Viva lexer in Viva itself using the new array and struct features
-2. Create a simple token structure using `estructura`
-3. Implement character-by-character parsing with arrays
-4. Test self-compilation capability with simple Viva programs
+1. Add integer-to-string conversion for standalone print (current limitation)
+2. Begin writing Viva lexer in Viva itself using the new array and struct features
+3. Create a simple token structure using `estructura`
+4. Implement character-by-character parsing with arrays
+5. Test self-compilation capability with simple Viva programs

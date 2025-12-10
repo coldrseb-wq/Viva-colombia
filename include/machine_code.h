@@ -226,6 +226,13 @@ int encode_syscall(MachineCode* mc);
 int encode_lea_rax_rip_rel(MachineCode* mc, int32_t off);
 int encode_lea_rdi_rip_rel(MachineCode* mc, int32_t off);
 int encode_lea_rsi_rip_rel(MachineCode* mc, int32_t off);
+int encode_lea_rsi_rip_rel_data(MachineCode* mc, int32_t data_offset);
+
+// === SYSCALL HELPERS (Linux x86-64) ===
+int encode_mov_rdi_imm32(MachineCode* mc, int32_t v);
+int encode_sys_write(MachineCode* mc, int32_t fd, int32_t count);
+int encode_sys_exit(MachineCode* mc, int32_t status);
+int encode_print_rsi_rdx(MachineCode* mc);
 
 // === RELOCATIONS ===
 int add_relocation_entry(MachineCode* mc, uint32_t sym, uint32_t type, int64_t add);
@@ -241,6 +248,7 @@ int add_elf_section(ELFFile* elf, const char* name, uint32_t type, uint64_t flag
 void create_text_section(ELFFile* elf, MachineCode* code);
 void create_data_section(ELFFile* elf, uint8_t* data, size_t size);
 void create_symbol_table(ELFFile* elf);
+void create_symbol_table_with_entry(ELFFile* elf, const char* entry_name, size_t text_size);
 int write_complete_elf_file(ELFFile* elf, const char* filename);
 
 #endif

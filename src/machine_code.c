@@ -1,4 +1,5 @@
 // src/machine_code.c - EXPANDED for Phase 4
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,6 +130,12 @@ int encode_mov_rcx_imm32(MachineCode* mc, int32_t v) {
 
 int encode_mov_rdx_imm32(MachineCode* mc, int32_t v) {
     uint8_t c[7] = {0x48, 0xC7, 0xC2};
+    memcpy(c + 3, &v, 4);
+    return append_bytes(mc, c, 7);
+}
+
+int encode_mov_rdi_imm32(MachineCode* mc, int32_t v) {
+    uint8_t c[7] = {0x48, 0xC7, 0xC7};
     memcpy(c + 3, &v, 4);
     return append_bytes(mc, c, 7);
 }
@@ -428,6 +435,45 @@ int encode_syscall(MachineCode* mc) {
     return append_bytes(mc, c, 2);
 }
 
+// === SYSCALL HELPERS (Linux x86-64) ===
+// Linux syscall numbers: write=1, exit=60, open=2, read=0, close=3
+// Arguments: rdi, rsi, rdx, r10, r8, r9
+
+// sys_write(fd, buf, count) - syscall 1
+// fd in rdi, buf pointer in rsi, count in rdx
+int encode_sys_write(MachineCode* mc, int32_t fd, int32_t count) {
+    // mov rax, 1 (sys_write)
+    encode_mov_rax_imm32(mc, 1);
+    // mov rdi, fd (file descriptor: 1=stdout, 2=stderr)
+    encode_mov_rdi_imm32(mc, fd);
+    // rsi should already have buf pointer (set by caller)
+    // mov rdx, count
+    encode_mov_rdx_imm32(mc, count);
+    // syscall
+    return encode_syscall(mc);
+}
+
+// sys_exit(status) - syscall 60
+int encode_sys_exit(MachineCode* mc, int32_t status) {
+    // mov rax, 60 (sys_exit)
+    encode_mov_rax_imm32(mc, 60);
+    // mov rdi, status
+    encode_mov_rdi_imm32(mc, status);
+    // syscall
+    return encode_syscall(mc);
+}
+
+// Helper: print string at rsi with length in rdx to stdout
+int encode_print_rsi_rdx(MachineCode* mc) {
+    // mov rax, 1 (sys_write)
+    encode_mov_rax_imm32(mc, 1);
+    // mov rdi, 1 (stdout)
+    encode_mov_rdi_imm32(mc, 1);
+    // rsi and rdx already set by caller
+    // syscall
+    return encode_syscall(mc);
+}
+
 // === LEA ===
 int encode_lea_rax_rip_rel(MachineCode* mc, int32_t off) {
     uint8_t c[7] = {0x48, 0x8D, 0x05};
@@ -445,6 +491,21 @@ int encode_lea_rsi_rip_rel(MachineCode* mc, int32_t off) {
     uint8_t c[7] = {0x48, 0x8D, 0x35};
     memcpy(c + 3, &off, 4);
     return append_bytes(mc, c, 7);
+}
+
+// LEA RSI with relocation to data section symbol
+int encode_lea_rsi_rip_rel_data(MachineCode* mc, int32_t data_offset) {
+    // Emit LEA RSI, [RIP + 0] (placeholder, will be fixed by linker)
+    uint8_t c[7] = {0x48, 0x8D, 0x35, 0, 0, 0, 0};
+    // The relocation offset points to the 4-byte displacement field
+    size_t reloc_offset = mc->size + 3;
+    int ret = append_bytes(mc, c, 7);
+    // Add R_X86_64_PC32 relocation
+    // Symbol 2 = .data section symbol (index in symtab)
+    // Addend = offset within .data section - 4 (for PC-relative)
+    add_relocation_entry(mc, 2, R_X86_64_PC32, data_offset - 4);
+    mc->relocations[mc->reloc_count - 1].r_offset = reloc_offset;
+    return ret;
 }
 
 // === RELOCATIONS ===
@@ -555,11 +616,102 @@ void create_symbol_table(ELFFile* e) {
     add_elf_section(e, ".shstrtab", SHT_STRTAB, 0);
 }
 
+void create_symbol_table_with_entry(ELFFile* e, const char* entry_name, size_t text_size) {
+    // Build .strtab - string table for symbols
+    size_t entry_len = strlen(entry_name) + 1;
+    size_t strtab_size = 1 + entry_len;  // null byte + entry name
+    uint8_t* strtab_data = calloc(1, strtab_size);
+    if (!strtab_data) return;
+    strtab_data[0] = '\0';  // First byte is always null
+    memcpy(strtab_data + 1, entry_name, entry_len);
+
+    int strtab_idx = add_elf_section(e, ".strtab", SHT_STRTAB, 0);
+    if (strtab_idx >= 0) {
+        e->sections[strtab_idx]->data = strtab_data;
+        e->sections[strtab_idx]->size = strtab_size;
+        e->strtab_section_idx = strtab_idx;
+    } else {
+        free(strtab_data);
+        return;
+    }
+
+    // Build .symtab - symbol table
+    // Need: null symbol + entry symbol (2 symbols)
+    Elf64_Sym* symtab_data = calloc(2, sizeof(Elf64_Sym));
+    if (!symtab_data) return;
+
+    // Symbol 0: null symbol (required)
+    // Already zeroed by calloc
+
+    // Symbol 1: entry symbol (_start or main)
+    symtab_data[1].st_name = 1;  // Offset in strtab
+    symtab_data[1].st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
+    symtab_data[1].st_other = 0;
+    symtab_data[1].st_shndx = e->text_section_idx + 1;  // Section index (+1 for null section)
+    symtab_data[1].st_value = 0;  // Offset in .text
+    symtab_data[1].st_size = text_size;
+
+    int symtab_idx = add_elf_section(e, ".symtab", SHT_SYMTAB, 0);
+    if (symtab_idx >= 0) {
+        e->sections[symtab_idx]->data = (uint8_t*)symtab_data;
+        e->sections[symtab_idx]->size = 2 * sizeof(Elf64_Sym);
+        e->sections[symtab_idx]->entsize = sizeof(Elf64_Sym);
+        e->sections[symtab_idx]->link = strtab_idx + 1;  // Link to strtab (+1 for null section)
+        e->sections[symtab_idx]->info = 1;  // Index of first global symbol
+        e->sections[symtab_idx]->addralign = 8;
+        e->symtab_section_idx = symtab_idx;
+    } else {
+        free(symtab_data);
+        return;
+    }
+
+    // Build .shstrtab - section header string table
+    const char* section_names[] = {".text", ".data", ".strtab", ".symtab", ".shstrtab"};
+    size_t shstrtab_size = 1;  // Start with null byte
+    for (int i = 0; i < 5; i++) {
+        shstrtab_size += strlen(section_names[i]) + 1;
+    }
+
+    uint8_t* shstrtab_data = calloc(1, shstrtab_size);
+    if (!shstrtab_data) return;
+    size_t pos = 1;  // Start after null byte
+    for (int i = 0; i < 5; i++) {
+        size_t len = strlen(section_names[i]) + 1;
+        memcpy(shstrtab_data + pos, section_names[i], len);
+        pos += len;
+    }
+
+    int shstrtab_idx = add_elf_section(e, ".shstrtab", SHT_STRTAB, 0);
+    if (shstrtab_idx >= 0) {
+        e->sections[shstrtab_idx]->data = shstrtab_data;
+        e->sections[shstrtab_idx]->size = shstrtab_size;
+        e->shstrtab_section_idx = shstrtab_idx;
+    } else {
+        free(shstrtab_data);
+    }
+}
+
+// Helper to find section name offset in shstrtab
+static uint32_t find_shstrtab_offset(ELFFile* e, const char* name) {
+    if (e->shstrtab_section_idx < 0) return 0;
+    ElfSection* shstrtab = e->sections[e->shstrtab_section_idx];
+    if (!shstrtab || !shstrtab->data) return 0;
+
+    // Search for the name in .shstrtab
+    for (size_t i = 0; i < shstrtab->size; ) {
+        if (strcmp((char*)(shstrtab->data + i), name) == 0) {
+            return (uint32_t)i;
+        }
+        i += strlen((char*)(shstrtab->data + i)) + 1;
+    }
+    return 0;
+}
+
 int write_complete_elf_file(ELFFile* e, const char* filename) {
     if (!e || !filename) return -1;
     FILE* f = fopen(filename, "wb");
     if (!f) return -1;
-    
+
     uint64_t off = sizeof(Elf64_Ehdr);
     for (int i = 0; i < e->num_sections; i++) {
         if (e->sections[i]->size > 0) {
@@ -568,34 +720,41 @@ int write_complete_elf_file(ELFFile* e, const char* filename) {
             off += e->sections[i]->size;
         }
     }
-    
+
     e->header.e_shnum = e->num_sections + 1;
     e->header.e_shoff = off;
-    
+    // Set shstrtab index (+1 because of null section at index 0)
+    if (e->shstrtab_section_idx >= 0) {
+        e->header.e_shstrndx = e->shstrtab_section_idx + 1;
+    }
+
     fwrite(&e->header, sizeof(Elf64_Ehdr), 1, f);
-    
+
     for (int i = 0; i < e->num_sections; i++) {
         if (e->sections[i]->data && e->sections[i]->size > 0) {
             fseek(f, e->sections[i]->offset, SEEK_SET);
             fwrite(e->sections[i]->data, 1, e->sections[i]->size, f);
         }
     }
-    
+
     fseek(f, off, SEEK_SET);
     Elf64_Shdr null_sh = {0};
     fwrite(&null_sh, sizeof(Elf64_Shdr), 1, f);
-    
+
     for (int i = 0; i < e->num_sections; i++) {
         Elf64_Shdr sh = {0};
+        sh.sh_name = find_shstrtab_offset(e, e->sections[i]->name);
         sh.sh_type = e->sections[i]->type;
         sh.sh_flags = e->sections[i]->flags;
         sh.sh_offset = e->sections[i]->offset;
         sh.sh_size = e->sections[i]->size;
+        sh.sh_link = e->sections[i]->link;
+        sh.sh_info = e->sections[i]->info;
         sh.sh_addralign = e->sections[i]->addralign;
         sh.sh_entsize = e->sections[i]->entsize;
         fwrite(&sh, sizeof(Elf64_Shdr), 1, f);
     }
-    
+
     fclose(f);
     return 0;
 }

@@ -49,6 +49,7 @@ typedef struct {
     UserFunc funcs[MAX_FUNCS];
     int nfunc;
     int in_function;  // Track if we're inside a function
+    int standalone;   // Phase 8: Generate standalone binary using syscalls (no libc)
 } Compiler;
 
 // Forward declarations
@@ -230,7 +231,9 @@ static void finish_compiler(Compiler* c) {
     if (c->mode == OUT_ELF && c->elf && c->mc) {
         write_elf_data_section(c);
         create_text_section(c->elf, c->mc);
-        create_symbol_table(c->elf);
+        // For standalone mode, use _start; otherwise use main
+        const char* entry = c->standalone ? "_start" : "main";
+        create_symbol_table_with_entry(c->elf, entry, c->mc->size);
         fclose(c->f);
         c->f = NULL;
         write_complete_elf_file(c->elf, c->outname);
@@ -567,23 +570,79 @@ static void compile_call(Compiler* c, ASTNode* n) {
     }
     else if (c->mc) {
         if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
-            if (n->left && n->left->type == NUMBER_NODE) {
-                encode_mov_rdi_imm64(c->mc, 0);  // fmt placeholder
-                encode_mov_rax_imm32(c->mc, atoi(n->left->value));
-                encode_mov_rsi_rax(c->mc);
-            } else if (n->left && n->left->type == BINARY_OP_NODE) {
-                compile_expr(c, n->left);
-                encode_mov_rsi_rax(c->mc);
-                encode_mov_rdi_imm64(c->mc, 0);
-            } else if (n->left && n->left->type == IDENTIFIER_NODE) {
-                int off = get_var_off(c, n->left->value);
-                encode_mov_rax_from_memory(c->mc, off);
-                encode_mov_rsi_rax(c->mc);
-                encode_mov_rdi_imm64(c->mc, 0);
+            int newline = (strcmp(fn,"println")==0);
+            if (c->standalone) {
+                // Phase 8: Use syscalls for standalone mode
+                // Embed strings inline in .text to avoid cross-section relocations
+                if (n->left && (n->left->type == STRING_LITERAL_NODE ||
+                    (n->left->type == IDENTIFIER_NODE && n->left->value && n->left->value[0]=='"'))) {
+                    // Get string content (strip quotes)
+                    const char* raw = n->left->value;
+                    int slen = strlen(raw);
+                    if (slen >= 2 && raw[0] == '"' && raw[slen-1] == '"') {
+                        slen -= 2;
+                        raw++;
+                    }
+
+                    // Emit: jmp over_string (skip string data)
+                    // String is embedded right after the jmp
+                    int jmp_pos = c->mc->size;
+                    encode_jmp_rel8(c->mc, 0);  // placeholder
+
+                    // Emit string bytes directly in .text
+                    int str_start = c->mc->size;
+                    for (int i = 0; i < slen; i++) {
+                        uint8_t ch = (uint8_t)raw[i];
+                        append_bytes(c->mc, &ch, 1);
+                    }
+                    // Add newline if println
+                    if (newline) {
+                        uint8_t nl = '\n';
+                        append_bytes(c->mc, &nl, 1);
+                        slen++;
+                    }
+
+                    int str_end = c->mc->size;
+                    // Patch jmp to skip over string
+                    int jmp_offset = str_end - (jmp_pos + 2);  // +2 for jmp instruction size
+                    c->mc->code[jmp_pos + 1] = (int8_t)jmp_offset;
+
+                    // Now emit the syscall code
+                    // lea rsi, [rip - offset] to point back to string
+                    int rip_to_str = -(c->mc->size + 7 - str_start);  // +7 for lea instruction size
+                    encode_lea_rsi_rip_rel(c->mc, rip_to_str);
+
+                    // mov rdx, len
+                    encode_mov_rdx_imm32(c->mc, slen);
+                    // sys_write(1, buf, len)
+                    encode_mov_rax_imm32(c->mc, 1);  // sys_write
+                    encode_mov_rdi_imm32(c->mc, 1);  // stdout
+                    encode_syscall(c->mc);
+                } else {
+                    // For numbers in standalone mode, we need int-to-string conversion
+                    // TODO: Add itoa implementation for standalone mode
+                    encode_nop(c->mc);
+                }
+            } else {
+                // Original printf-based code
+                if (n->left && n->left->type == NUMBER_NODE) {
+                    encode_mov_rdi_imm64(c->mc, 0);  // fmt placeholder
+                    encode_mov_rax_imm32(c->mc, atoi(n->left->value));
+                    encode_mov_rsi_rax(c->mc);
+                } else if (n->left && n->left->type == BINARY_OP_NODE) {
+                    compile_expr(c, n->left);
+                    encode_mov_rsi_rax(c->mc);
+                    encode_mov_rdi_imm64(c->mc, 0);
+                } else if (n->left && n->left->type == IDENTIFIER_NODE) {
+                    int off = get_var_off(c, n->left->value);
+                    encode_mov_rax_from_memory(c->mc, off);
+                    encode_mov_rsi_rax(c->mc);
+                    encode_mov_rdi_imm64(c->mc, 0);
+                }
+                encode_xor_rax_rax(c->mc);
+                add_relocation_entry(c->mc, 1, R_X86_64_PLT32, -4);
+                encode_call_rel32(c->mc, 0);
             }
-            encode_xor_rax_rax(c->mc);
-            add_relocation_entry(c->mc, 1, R_X86_64_PLT32, -4);
-            encode_call_rel32(c->mc, 0);
         } else if (uf) {
             // User-defined function call
             // Move argument to rdi (first arg register)
@@ -1233,9 +1292,14 @@ static void compile_main(Compiler* c, ASTNode* ast) {
         // Code already in buffer, append ending
         emit(c, "    xor rax,rax\n    leave\n    ret\n");
     } else if (c->mc) {
-        encode_xor_rax_rax(c->mc);
-        encode_leave(c->mc);
-        encode_ret(c->mc);
+        if (c->standalone) {
+            // Phase 8: Use sys_exit for standalone binaries
+            encode_sys_exit(c->mc, 0);  // exit(0)
+        } else {
+            encode_xor_rax_rax(c->mc);
+            encode_leave(c->mc);
+            encode_ret(c->mc);
+        }
     }
 }
 
@@ -1283,6 +1347,21 @@ int compile_viva_to_platform(const char* code, const char* outfile, PlatformTarg
     Compiler* c = init_compiler(outfile, OUT_ELF);
     if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
     c->plat = plat;
+    if (ast) compile_main(c, ast);
+    finish_compiler(c);
+    free_token_stream(t);
+    free_ast_node(ast);
+    return 0;
+}
+
+// Phase 8: Standalone ELF compilation (no libc, direct syscalls)
+int compile_viva_to_standalone_elf(const char* code, const char* outfile) {
+    TokenStream* t = tokenize(code);
+    ASTNode* ast = parse_program(t);
+    Compiler* c = init_compiler(outfile, OUT_ELF);
+    if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
+    c->plat = PLATFORM_LINUX;
+    c->standalone = 1;  // Enable standalone mode - use syscalls instead of libc
     if (ast) compile_main(c, ast);
     finish_compiler(c);
     free_token_stream(t);

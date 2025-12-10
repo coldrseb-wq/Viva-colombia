@@ -1,0 +1,5 @@
+// Phase 8 Standalone Test - No libc dependency
+// This should compile to a standalone ELF using syscalls directly
+
+println("Hola desde standalone!");
+println("Viva Colombia!");

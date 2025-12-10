@@ -42,6 +42,7 @@ int main(int argc, char *argv[]) {
         printf("       %s [file.viva] -e [output.o]                (compile to ELF)\n", argv[0]);
         printf("       %s [file.viva] -e -p [platform] [output.o]  (compile to platform)\n", argv[0]);
         printf("         platforms: linux, macos, windows\n");
+        printf("       %s [file.viva] -S [output.o]                (standalone ELF, no libc)\n", argv[0]);
         return 1;
     }
 
@@ -53,6 +54,7 @@ int main(int argc, char *argv[]) {
     int compile_mode = 0;
     int asm_mode = 0;
     int elf_mode = 0;
+    int standalone_mode = 0;
     const char* output_file = NULL;
     PlatformTarget platform = PLATFORM_LINUX;
 
@@ -86,6 +88,10 @@ int main(int argc, char *argv[]) {
             free(source);
             return 1;
         }
+    } else if (argc >= 4 && strcmp(argv[2], "-S") == 0) {
+        // Phase 8: Standalone mode (no libc, direct syscalls)
+        standalone_mode = 1;
+        output_file = argv[3];
     }
 
     // Execute based on mode
@@ -129,6 +135,18 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         printf("%s compilation successful!\n", plat_name);
+    }
+    else if (standalone_mode) {
+        // Phase 8: Standalone ELF mode (no libc dependency)
+        printf("Compiling %s to standalone ELF: %s\n", argv[1], output_file);
+        int result = compile_viva_to_standalone_elf(source, output_file);
+        free(source);
+        if (result != 0) {
+            fprintf(stderr, "Standalone compilation failed\n");
+            return 1;
+        }
+        printf("Standalone ELF compilation successful!\n");
+        printf("Link with: ld -o program %s (no libc needed)\n", output_file);
     }
     else {
         // Interpreter mode
