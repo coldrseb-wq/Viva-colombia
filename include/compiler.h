@@ -22,4 +22,7 @@ int compile_viva_to_elf(const char* viva_code, const char* elf_output_file);
 // Function to compile Viva source code to platform-specific object code
 int compile_viva_to_platform(const char* viva_code, const char* output_file, PlatformTarget platform);
 
+// Function to compile Viva source code to standalone executable (no libc!)
+int compile_viva_to_standalone(const char* viva_code, const char* output_file);
+
 #endif

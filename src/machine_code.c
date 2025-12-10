@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include "../include/machine_code.h"
 
 MachineCode* init_machine_code() {
@@ -14,6 +15,9 @@ MachineCode* init_machine_code() {
     mc->reloc_count = 0;
     mc->reloc_capacity = 16;
     mc->relocations = malloc(mc->reloc_capacity * sizeof(Elf64_Rela));
+    mc->data_reloc_count = 0;
+    mc->data_reloc_capacity = 16;
+    mc->data_relocs = malloc(mc->data_reloc_capacity * sizeof(DataReloc));
     return mc;
 }
 
@@ -21,6 +25,7 @@ void free_machine_code(MachineCode* mc) {
     if (mc) {
         if (mc->code) free(mc->code);
         if (mc->relocations) free(mc->relocations);
+        if (mc->data_relocs) free(mc->data_relocs);
         free(mc);
     }
 }
@@ -429,6 +434,36 @@ int encode_syscall(MachineCode* mc) {
     return append_bytes(mc, c, 2);
 }
 
+// === LINUX SYSCALL HELPERS ===
+// sys_write(fd=RDI, buf=RSI, count=RDX) - syscall #1
+int encode_sys_write(MachineCode* mc) {
+    encode_mov_rax_imm32(mc, 1);  // syscall number for write
+    return encode_syscall(mc);
+}
+
+// sys_exit(status=RDI) - syscall #60
+int encode_sys_exit(MachineCode* mc) {
+    encode_mov_rax_imm32(mc, 60);  // syscall number for exit
+    return encode_syscall(mc);
+}
+
+// Helper: print string at RIP-relative offset, length in RDX
+// Sets up: RDI=1 (stdout), RSI=string address, RDX=length (must be set before)
+int encode_print_string_setup(MachineCode* mc, int32_t str_offset) {
+    encode_mov_rax_imm32(mc, 1);           // RDI = 1 (stdout)
+    encode_mov_rdi_rax(mc);
+    encode_lea_rsi_rip_rel(mc, str_offset); // RSI = string address
+    return 0;
+}
+
+// Helper: exit with status code
+int encode_exit_with_code(MachineCode* mc, int code) {
+    encode_mov_rax_imm32(mc, code);
+    encode_mov_rdi_rax(mc);
+    encode_mov_rax_imm32(mc, 60);
+    return encode_syscall(mc);
+}
+
 // === LEA ===
 int encode_lea_rax_rip_rel(MachineCode* mc, int32_t off) {
     uint8_t c[7] = {0x48, 0x8D, 0x05};
@@ -459,6 +494,22 @@ int add_relocation_entry(MachineCode* mc, uint32_t sym, uint32_t type, int64_t a
     r->r_offset = mc->size;
     r->r_info = ELF64_R_INFO(sym, type);
     r->r_addend = add;
+    return 0;
+}
+
+// Add a data relocation for standalone mode
+// Records that the 4 bytes at (current_position - 4) need to be patched
+// with the RIP-relative offset to data_offset in the data section
+int add_data_relocation(MachineCode* mc, int32_t data_offset) {
+    if (!mc) return -1;
+    if (mc->data_reloc_count >= mc->data_reloc_capacity) {
+        mc->data_reloc_capacity *= 2;
+        mc->data_relocs = realloc(mc->data_relocs, mc->data_reloc_capacity * sizeof(DataReloc));
+        if (!mc->data_relocs) return -1;
+    }
+    DataReloc* dr = &mc->data_relocs[mc->data_reloc_count++];
+    dr->code_offset = mc->size - 4;  // The 4-byte displacement was just written
+    dr->data_offset = data_offset;
     return 0;
 }
 
@@ -681,5 +732,104 @@ int write_complete_elf_file(ELFFile* e, const char* filename) {
     }
 
     fclose(f);
+    return 0;
+}
+
+// === STANDALONE ELF EXECUTABLE WRITER ===
+// Creates a directly executable ELF binary - NO libc, NO linker needed!
+// Uses Linux syscalls directly for I/O.
+
+#define VADDR_BASE 0x400000  // Standard Linux executable base address
+
+int write_standalone_elf_executable(const char* filename, MachineCode* code,
+                                    uint8_t* data, size_t data_size) {
+    if (!filename || !code) return -1;
+
+    FILE* f = fopen(filename, "wb");
+    if (!f) return -1;
+
+    // Simple layout: single LOAD segment containing everything
+    // [ELF Header (64 bytes)]
+    // [Program Header (56 bytes)]
+    // [.text section (code->size bytes)]
+    // [.data section (data_size bytes)]
+    //
+    // All loaded at virtual address VADDR_BASE, mapped from file offset 0
+
+    size_t ehdr_size = sizeof(Elf64_Ehdr);      // 64 bytes
+    size_t phdr_size = sizeof(Elf64_Phdr);      // 56 bytes
+    size_t headers_size = ehdr_size + phdr_size;  // 120 bytes
+
+    size_t code_offset = headers_size;
+    size_t data_offset = code_offset + code->size;
+    size_t total_size = data_offset + (data ? data_size : 0);
+
+    // Virtual addresses
+    size_t code_vaddr = VADDR_BASE + code_offset;
+    size_t data_vaddr = VADDR_BASE + data_offset;
+
+    // Build ELF header
+    Elf64_Ehdr ehdr = {0};
+    ehdr.e_ident[0] = 0x7f;
+    ehdr.e_ident[1] = 'E';
+    ehdr.e_ident[2] = 'L';
+    ehdr.e_ident[3] = 'F';
+    ehdr.e_ident[4] = ELFCLASS64;
+    ehdr.e_ident[5] = ELFDATA2LSB;
+    ehdr.e_ident[6] = EV_CURRENT;
+    ehdr.e_type = ET_EXEC;
+    ehdr.e_machine = EM_X86_64;
+    ehdr.e_version = EV_CURRENT;
+    ehdr.e_entry = code_vaddr;  // Entry point = start of code
+    ehdr.e_phoff = ehdr_size;   // Program headers right after ELF header
+    ehdr.e_shoff = 0;           // No section headers needed for execution
+    ehdr.e_flags = 0;
+    ehdr.e_ehsize = ehdr_size;
+    ehdr.e_phentsize = phdr_size;
+    ehdr.e_phnum = 1;           // Single LOAD segment
+    ehdr.e_shentsize = 0;
+    ehdr.e_shnum = 0;
+    ehdr.e_shstrndx = 0;
+
+    // Single program header: load entire file from offset 0
+    Elf64_Phdr phdr = {0};
+    phdr.p_type = PT_LOAD;
+    phdr.p_flags = PF_R | PF_W | PF_X;  // Read + Write + Execute
+    phdr.p_offset = 0;                  // Load from start of file
+    phdr.p_vaddr = VADDR_BASE;          // Map to base address
+    phdr.p_paddr = VADDR_BASE;
+    phdr.p_filesz = total_size;         // Entire file
+    phdr.p_memsz = total_size;
+    phdr.p_align = 0x1000;              // Page alignment
+
+    // Apply data relocations: patch RIP-relative offsets to data section
+    for (size_t i = 0; i < code->data_reloc_count; i++) {
+        DataReloc* dr = &code->data_relocs[i];
+        // Calculate RIP-relative offset:
+        // instruction_addr = code_vaddr + dr->code_offset (points to the 4-byte displacement)
+        // RIP after instruction = instruction_addr + 4 (displacement is 4 bytes)
+        // target_addr = data_vaddr + dr->data_offset
+        // offset = target_addr - RIP_after
+        size_t rip_after = code_vaddr + dr->code_offset + 4;
+        size_t target = data_vaddr + dr->data_offset;
+        int32_t offset = (int32_t)(target - rip_after);
+        memcpy(code->code + dr->code_offset, &offset, 4);
+    }
+
+    // Write everything
+    fwrite(&ehdr, ehdr_size, 1, f);
+    fwrite(&phdr, phdr_size, 1, f);
+    fwrite(code->code, code->size, 1, f);
+    if (data && data_size > 0) {
+        fwrite(data, data_size, 1, f);
+    }
+
+    fclose(f);
+
+    // Make executable (chmod +x)
+    #ifndef _WIN32
+    chmod(filename, 0755);
+    #endif
+
     return 0;
 }

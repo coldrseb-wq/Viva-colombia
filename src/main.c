@@ -39,7 +39,8 @@ int main(int argc, char *argv[]) {
         printf("Usage: %s [file.viva]                              (run interpreter)\n", argv[0]);
         printf("       %s [file.viva] -c [output.c]                (compile to C)\n", argv[0]);
         printf("       %s [file.viva] -s [output.s]                (compile to assembly)\n", argv[0]);
-        printf("       %s [file.viva] -e [output.o]                (compile to ELF)\n", argv[0]);
+        printf("       %s [file.viva] -e [output.o]                (compile to ELF object)\n", argv[0]);
+        printf("       %s [file.viva] -x [output]                  (standalone executable - NO libc!)\n", argv[0]);
         printf("       %s [file.viva] -e -p [platform] [output.o]  (compile to platform)\n", argv[0]);
         printf("         platforms: linux, macos, windows\n");
         return 1;
@@ -53,6 +54,7 @@ int main(int argc, char *argv[]) {
     int compile_mode = 0;
     int asm_mode = 0;
     int elf_mode = 0;
+    int standalone_mode = 0;
     const char* output_file = NULL;
     PlatformTarget platform = PLATFORM_LINUX;
 
@@ -62,6 +64,9 @@ int main(int argc, char *argv[]) {
         output_file = argv[3];
     } else if (argc >= 4 && strcmp(argv[2], "-s") == 0) {
         asm_mode = 1;
+        output_file = argv[3];
+    } else if (argc >= 4 && strcmp(argv[2], "-x") == 0) {
+        standalone_mode = 1;
         output_file = argv[3];
     } else if (argc >= 4 && strcmp(argv[2], "-e") == 0) {
         elf_mode = 1;
@@ -129,6 +134,17 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         printf("%s compilation successful!\n", plat_name);
+    }
+    else if (standalone_mode) {
+        printf("Compiling %s to standalone executable: %s\n", argv[1], output_file);
+        int result = compile_viva_to_standalone(source, output_file);
+        free(source);
+        if (result != 0) {
+            fprintf(stderr, "Standalone compilation failed\n");
+            return 1;
+        }
+        printf("Standalone compilation successful! (NO libc required)\n");
+        printf("Run with: ./%s\n", output_file);
     }
     else {
         // Interpreter mode

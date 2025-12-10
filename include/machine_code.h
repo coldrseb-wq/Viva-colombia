@@ -63,7 +63,29 @@ typedef struct {
 #define ELFDATA2LSB 1
 #define EV_CURRENT 1
 #define ET_REL 1
+#define ET_EXEC 2
 #define EM_X86_64 62
+
+// Program header types
+#define PT_NULL 0
+#define PT_LOAD 1
+
+// Program header flags
+#define PF_X 1  // Execute
+#define PF_W 2  // Write
+#define PF_R 4  // Read
+
+// Program header structure
+typedef struct {
+    uint32_t p_type;
+    uint32_t p_flags;
+    uint64_t p_offset;
+    uint64_t p_vaddr;
+    uint64_t p_paddr;
+    uint64_t p_filesz;
+    uint64_t p_memsz;
+    uint64_t p_align;
+} Elf64_Phdr;
 #define SHT_NULL 0
 #define SHT_PROGBITS 1
 #define SHT_SYMTAB 2
@@ -95,6 +117,12 @@ typedef struct {
 #define ELF64_R_TYPE(i) ((i)&0xffffffffL)
 #define ELF64_R_INFO(s,t) ((((uint64_t)(s))<<32)+((t)&0xffffffffL))
 
+// === DATA RELOCATION (for standalone executables) ===
+typedef struct {
+    size_t code_offset;    // Position in code where to patch (offset of the 32-bit displacement)
+    int32_t data_offset;   // Offset within data section
+} DataReloc;
+
 // === MACHINE CODE STRUCT ===
 typedef struct {
     uint8_t* code;
@@ -103,6 +131,9 @@ typedef struct {
     Elf64_Rela* relocations;
     size_t reloc_count;
     size_t reloc_capacity;
+    DataReloc* data_relocs;  // For standalone mode: tracks LEA instructions needing fixup
+    size_t data_reloc_count;
+    size_t data_reloc_capacity;
 } MachineCode;
 
 // === ELF SECTION ===
@@ -228,8 +259,15 @@ int encode_lea_rax_rip_rel(MachineCode* mc, int32_t off);
 int encode_lea_rdi_rip_rel(MachineCode* mc, int32_t off);
 int encode_lea_rsi_rip_rel(MachineCode* mc, int32_t off);
 
+// === LINUX SYSCALL HELPERS (C-free I/O) ===
+int encode_sys_write(MachineCode* mc);
+int encode_sys_exit(MachineCode* mc);
+int encode_print_string_setup(MachineCode* mc, int32_t str_offset);
+int encode_exit_with_code(MachineCode* mc, int code);
+
 // === RELOCATIONS ===
 int add_relocation_entry(MachineCode* mc, uint32_t sym, uint32_t type, int64_t add);
+int add_data_relocation(MachineCode* mc, int32_t data_offset);  // For standalone mode
 
 // === LABEL MANAGEMENT ===
 int get_current_offset(MachineCode* mc);
@@ -243,5 +281,9 @@ void create_text_section(ELFFile* elf, MachineCode* code);
 void create_data_section(ELFFile* elf, uint8_t* data, size_t size);
 void create_symbol_table(ELFFile* elf);
 int write_complete_elf_file(ELFFile* elf, const char* filename);
+
+// === STANDALONE ELF EXECUTABLE (no libc needed) ===
+int write_standalone_elf_executable(const char* filename, MachineCode* code,
+                                    uint8_t* data, size_t data_size);
 
 #endif

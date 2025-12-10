@@ -14,7 +14,7 @@
 #define MAX_BUF 16384
 #define MAX_LABELS 256
 
-typedef enum { OUT_C, OUT_ASM, OUT_ELF } OutMode;
+typedef enum { OUT_C, OUT_ASM, OUT_ELF, OUT_STANDALONE } OutMode;
 
 typedef struct { char name[64]; int is_str; int offset; } Var;
 typedef struct { char val[256]; char lbl[32]; int offset; } Str;
@@ -120,9 +120,11 @@ static Compiler* init_compiler(const char* outfile, OutMode mode) {
     c->plat = PLATFORM_LINUX;
     strncpy(c->outname, outfile, 255);
     
-    if (mode == OUT_ELF) {
+    if (mode == OUT_ELF || mode == OUT_STANDALONE) {
         c->mc = init_machine_code();
-        c->elf = init_elf_file();
+        if (mode == OUT_ELF) {
+            c->elf = init_elf_file();
+        }
     }
     
     c->f = fopen(outfile, "wb");
@@ -182,13 +184,13 @@ static void write_elf_data_section(Compiler* c) {
 
 static void finish_compiler(Compiler* c) {
     if (!c) return;
-    
+
     if (c->mode == OUT_ASM) {
         write_asm_strings(c);
         if (c->bufpos > 0)
             fwrite(c->buf, 1, c->bufpos, c->f);
     }
-    
+
     if (c->mode == OUT_ELF && c->elf && c->mc) {
         write_elf_data_section(c);
         create_text_section(c->elf, c->mc);
@@ -197,7 +199,30 @@ static void finish_compiler(Compiler* c) {
         c->f = NULL;
         write_complete_elf_file(c->elf, c->outname);
     }
-    
+
+    if (c->mode == OUT_STANDALONE && c->mc) {
+        // Build data section for strings
+        uint8_t* data = NULL;
+        size_t data_size = 0;
+        if (c->nstr > 0) {
+            data_size = c->data_size;
+            data = calloc(1, data_size + 1);
+            if (data) {
+                int off = 0;
+                for (int i = 0; i < c->nstr; i++) {
+                    size_t len = strlen(c->strs[i].val);
+                    memcpy(data + off, c->strs[i].val, len);
+                    data[off + len] = '\n';  // Add newline for syscall output
+                    off += len + 1;
+                }
+            }
+        }
+        fclose(c->f);
+        c->f = NULL;
+        write_standalone_elf_executable(c->outname, c->mc, data, data_size);
+        if (data) free(data);
+    }
+
     if (c->f) fclose(c->f);
     if (c->mc) free_machine_code(c->mc);
     if (c->elf) free_elf_file(c->elf);
@@ -428,7 +453,8 @@ static void compile_call(Compiler* c, ASTNode* n) {
             emit(c, "    call %s\n", fn);
         }
     }
-    else if (c->mc) {
+    else if (c->mode == OUT_ELF && c->mc) {
+        // ELF object mode - uses printf via relocation
         if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
             if (n->left && n->left->type == NUMBER_NODE) {
                 encode_mov_rdi_imm64(c->mc, 0);  // fmt placeholder
@@ -449,6 +475,47 @@ static void compile_call(Compiler* c, ASTNode* n) {
             encode_call_rel32(c->mc, 0);
         } else {
             encode_call_external(c->mc);
+        }
+    }
+    else if (c->mode == OUT_STANDALONE && c->mc) {
+        // Standalone mode - uses Linux syscalls directly (NO libc!)
+        if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
+            int is_println = (strcmp(fn,"println")==0);
+
+            if (n->left && (n->left->type == STRING_LITERAL_NODE ||
+                (n->left->type == IDENTIFIER_NODE && n->left->value && n->left->value[0]=='"'))) {
+                // String literal - use sys_write syscall
+                char* l = add_str(c, n->left->value);
+                int str_off = get_str_offset(c, l);
+                size_t str_len = strlen(c->strs[c->nstr-1].val);
+                if (is_println) str_len++;  // Include newline
+
+                // sys_write(fd=1, buf=str, count=len)
+                encode_mov_rax_imm32(c->mc, 1);     // RAX = 1 (sys_write)
+                encode_mov_rdi_rax(c->mc);          // RDI = 1 (stdout)
+                encode_lea_rsi_rip_rel(c->mc, 0);   // RSI = string address (placeholder)
+                add_data_relocation(c->mc, str_off);  // Record for fixup
+                encode_mov_rdx_imm32(c->mc, (int32_t)str_len);  // RDX = length
+                encode_syscall(c->mc);
+            }
+            else if (n->left && n->left->type == NUMBER_NODE) {
+                // Number - need to convert to string and print
+                // For now, we'll use a simple approach: just store the number as a string
+                char num_str[32];
+                snprintf(num_str, sizeof(num_str), "\"%s\"", n->left->value);
+                char* l = add_str(c, num_str);
+                int str_off = get_str_offset(c, l);
+                size_t str_len = strlen(c->strs[c->nstr-1].val);
+                if (is_println) str_len++;
+
+                encode_mov_rax_imm32(c->mc, 1);
+                encode_mov_rdi_rax(c->mc);
+                encode_lea_rsi_rip_rel(c->mc, 0);
+                add_data_relocation(c->mc, str_off);
+                encode_mov_rdx_imm32(c->mc, (int32_t)str_len);
+                encode_syscall(c->mc);
+            }
+            // Note: Variable printing not fully implemented for standalone yet
         }
     }
 }
@@ -765,9 +832,13 @@ static void compile_main(Compiler* c, ASTNode* ast) {
         emit(c, "    push rbp\n");
         emit(c, "    mov rbp, rsp\n");
         emit(c, "    sub rsp, 256\n");
-    } else if (c->mc) {
+    } else if (c->mode == OUT_ELF && c->mc) {
         encode_push_rbp(c->mc);
         encode_mov_rbp_rsp(c->mc);
+        encode_sub_rsp_imm8(c->mc, 128);
+    } else if (c->mode == OUT_STANDALONE && c->mc) {
+        // Standalone: no frame setup needed, we use _start entry
+        // Just set up stack for local variables
         encode_sub_rsp_imm8(c->mc, 128);
     }
 
@@ -780,10 +851,15 @@ static void compile_main(Compiler* c, ASTNode* ast) {
         emit(c, "    xor rax, rax\n");
         emit(c, "    leave\n");
         emit(c, "    ret\n");
-    } else if (c->mc) {
+    } else if (c->mode == OUT_ELF && c->mc) {
         encode_xor_rax_rax(c->mc);
         encode_leave(c->mc);
         encode_ret(c->mc);
+    } else if (c->mode == OUT_STANDALONE && c->mc) {
+        // Standalone: use sys_exit(0) syscall
+        encode_mov_rdi_imm64(c->mc, 0);   // RDI = 0 (exit code)
+        encode_mov_rax_imm32(c->mc, 60);  // RAX = 60 (sys_exit)
+        encode_syscall(c->mc);
     }
 }
 
@@ -831,6 +907,19 @@ int compile_viva_to_platform(const char* code, const char* outfile, PlatformTarg
     Compiler* c = init_compiler(outfile, OUT_ELF);
     if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
     c->plat = plat;
+    if (ast) compile_main(c, ast);
+    finish_compiler(c);
+    free_token_stream(t);
+    free_ast_node(ast);
+    return 0;
+}
+
+int compile_viva_to_standalone(const char* code, const char* outfile) {
+    TokenStream* t = tokenize(code);
+    ASTNode* ast = parse_program(t);
+    Compiler* c = init_compiler(outfile, OUT_STANDALONE);
+    if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
+    c->plat = PLATFORM_LINUX;
     if (ast) compile_main(c, ast);
     finish_compiler(c);
     free_token_stream(t);
