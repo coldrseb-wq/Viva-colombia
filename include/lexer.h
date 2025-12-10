@@ -13,6 +13,8 @@ typedef enum {
     MULTIPLY,
     DIVIDE,
     MODULO,         // For % operator
+    INCREMENT,      // For ++ operator
+    DECREMENT,      // For -- operator
     ASSIGN,         // For = in variable assignment
     EQUALITY,       // For == operator
     NOT_EQUAL,      // For != operator

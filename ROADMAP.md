@@ -120,6 +120,10 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Modulo operator (`%`) for arithmetic operations
 - ✅ String length function (`len()`/`largo()`)
 - ✅ Character access in strings (`s[0]` returns ASCII code)
+- ✅ Increment/decrement operators (`++`, `--`) - both standalone and in for loops
+- ✅ Break and continue keywords (`romper`/`break`, `continuar`/`continue`)
+- ✅ Logical operators (`&&`/`y`, `||`/`o`) fixed in parser precedence
+- ✅ String concatenation with `+` operator (e.g., `"Hola" + " " + "Colombia"`)
 
 ### Current Tasks:
 - [ ] Advanced machine code optimization passes
@@ -162,15 +166,19 @@ The compiler now generates proper platform-specific object files (ELF, Mach-O, P
 ### Verified Working Features (via stress_test.viva, func_test.viva, return_test.viva, for_test.viva, array_test.viva):
 - Variables and assignments
 - Arithmetic operations (+, -, *, /, %)
+- Increment/decrement operators (++, --)
 - Complex expressions with precedence
 - All comparison operators (<, >, <=, >=, ==, !=)
+- Logical operators (&&, ||)
 - If statements with else blocks
 - Nested conditionals
 - While loops with proper body execution
-- For loops (para) with init/condition/increment
+- For loops (para) with init/condition/increment and i++/i-- support
+- Break and continue statements (romper/continuar)
 - Nested for loops
 - Arrays (declaration, assignment, access)
 - String handling and printing
+- String concatenation with + operator
 - String length function (len/largo)
 - Character access in strings
 - Colombian hero functions (bolivar, garcia, etc.)

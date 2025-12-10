@@ -598,7 +598,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                 (*pos)++; // skip ';'
             }
 
-            // Parse increment expression - may be an assignment like i = i + 1
+            // Parse increment expression - may be an assignment like i = i + 1, or i++/i--
             ASTNode* inc_left = parse_expression(tokens, pos);
             if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
                 (*pos)++; // skip '='
@@ -607,6 +607,18 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                 increment_expr->value = inc_left->value ? strdup(inc_left->value) : NULL;
                 increment_expr->left = inc_left;
                 increment_expr->right = inc_right;
+            } else if (*pos < tokens->count && tokens->tokens[*pos]->type == INCREMENT) {
+                // Handle i++ in for loop increment
+                (*pos)++; // skip '++'
+                increment_expr = init_ast_node(INCREMENT_NODE);
+                increment_expr->value = inc_left->value ? strdup(inc_left->value) : NULL;
+                free_ast_node(inc_left);
+            } else if (*pos < tokens->count && tokens->tokens[*pos]->type == DECREMENT) {
+                // Handle i-- in for loop increment
+                (*pos)++; // skip '--'
+                increment_expr = init_ast_node(DECREMENT_NODE);
+                increment_expr->value = inc_left->value ? strdup(inc_left->value) : NULL;
+                free_ast_node(inc_left);
             } else {
                 increment_expr = inc_left;
             }
@@ -841,6 +853,32 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
             node = init_ast_node(ASSIGN_NODE);
             node->value = var_name;
             node->left = value_expr; // value to assign
+
+            // Check and consume semicolon if present
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                (*pos)++; // skip semicolon
+            }
+            return node;
+        } else if (next_pos < tokens->count && tokens->tokens[next_pos]->type == INCREMENT) {
+            // Increment: i++
+            char* var_name = strdup(tokens->tokens[*pos]->value);
+            (*pos) += 2; // skip identifier and ++
+
+            node = init_ast_node(INCREMENT_NODE);
+            node->value = var_name;
+
+            // Check and consume semicolon if present
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                (*pos)++; // skip semicolon
+            }
+            return node;
+        } else if (next_pos < tokens->count && tokens->tokens[next_pos]->type == DECREMENT) {
+            // Decrement: i--
+            char* var_name = strdup(tokens->tokens[*pos]->value);
+            (*pos) += 2; // skip identifier and --
+
+            node = init_ast_node(DECREMENT_NODE);
+            node->value = var_name;
 
             // Check and consume semicolon if present
             if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {

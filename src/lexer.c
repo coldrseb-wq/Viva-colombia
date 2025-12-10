@@ -139,8 +139,22 @@ TokenStream* tokenize(const char* source) {
 
             TokenType type;
             switch (*current) {
-                case '+': type = PLUS; break;
-                case '-': type = MINUS; break;
+                case '+':
+                    if (*(current + 1) == '+') {
+                        current++; // Skip next '+'
+                        type = INCREMENT;
+                    } else {
+                        type = PLUS;
+                    }
+                    break;
+                case '-':
+                    if (*(current + 1) == '-') {
+                        current++; // Skip next '-'
+                        type = DECREMENT;
+                    } else {
+                        type = MINUS;
+                    }
+                    break;
                 case '*': type = MULTIPLY; break;
                 case '/': type = DIVIDE; break;
                 case '%': type = MODULO; break;

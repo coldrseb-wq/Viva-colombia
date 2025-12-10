@@ -28,6 +28,8 @@ typedef enum {
     ARRAY_ACCESS_NODE,      // For array access operations (arr[index])
     ARRAY_DECL_NODE,        // For array declarations and assignments
     UNARY_OP_NODE,          // For unary operations like ! (not)
+    INCREMENT_NODE,         // For ++ operator
+    DECREMENT_NODE,         // For -- operator
     CONDITION_NODE,         // For condition expressions
     ELSE_NODE               // For else clauses
 } NodeType;

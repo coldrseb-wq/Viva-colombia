@@ -139,6 +139,7 @@ static Compiler* init_compiler(const char* outfile, OutMode mode) {
             "void prtln(char* s){printf(\"%%s\\n\",s);}\n"
             "void prtnum(int n){printf(\"%%d\",n);}\n"
             "void prtlnnum(int n){printf(\"%%d\\n\",n);}\n"
+            "char* strconcat(char* a, char* b){char* r=malloc(strlen(a)+strlen(b)+1);strcpy(r,a);strcat(r,b);return r;}\n"
             "void bolivar(){printf(\"Simon Bolivar: Libertador\\n\");}\n"
             "void narino(){printf(\"Francisco Narino: Heroe\\n\");}\n"
             "void cano(){printf(\"Maria Cano: Lider\\n\");}\n"
@@ -226,10 +227,34 @@ static void finish_compiler(Compiler* c) {
     free(c);
 }
 
+// === HELPER: Check if expression is string type ===
+static int is_string_expr_c(Compiler* c, ASTNode* n) {
+    if (!n) return 0;
+    if (n->type == STRING_LITERAL_NODE) return 1;
+    if (n->type == IDENTIFIER_NODE && n->value && n->value[0] == '"') return 1;
+    if (n->type == IDENTIFIER_NODE && n->value && c) {
+        // Check if variable is registered as a string
+        if (is_var_str(c, n->value)) return 1;
+    }
+    if (n->type == BINARY_OP_NODE && n->value && strcmp(n->value, "+") == 0) {
+        return is_string_expr_c(c, n->left) || is_string_expr_c(c, n->right);
+    }
+    if (n->type == FN_CALL_NODE && n->value) {
+        // len() returns int, strconcat returns string
+        if (strcmp(n->value, "strconcat") == 0) return 1;
+    }
+    return 0;
+}
+
+// Wrapper without compiler context (for use before variables are registered)
+static int is_string_expr(ASTNode* n) {
+    return is_string_expr_c(NULL, n);
+}
+
 // === EXPRESSION COMPILATION ===
 static void compile_expr(Compiler* c, ASTNode* n) {
     if (!n) return;
-    
+
     if (n->type == NUMBER_NODE) {
         if (c->mode == OUT_C) emit(c, "%s", n->value);
         else if (c->mode == OUT_ASM) emit(c, "    mov rax, %s\n", n->value);
@@ -288,11 +313,24 @@ static void compile_expr(Compiler* c, ASTNode* n) {
     }
     else if (n->type == BINARY_OP_NODE) {
         if (c->mode == OUT_C) {
-            emit(c, "(");
-            compile_expr(c, n->left);
-            emit(c, " %s ", n->value ? n->value : "+");
-            compile_expr(c, n->right);
-            emit(c, ")");
+            // Check for string concatenation (+ with string expressions/variables)
+            int is_str_left = is_string_expr_c(c, n->left);
+            int is_str_right = is_string_expr_c(c, n->right);
+
+            if (n->value && strcmp(n->value, "+") == 0 && (is_str_left || is_str_right)) {
+                // String concatenation
+                emit(c, "strconcat(");
+                compile_expr(c, n->left);
+                emit(c, ", ");
+                compile_expr(c, n->right);
+                emit(c, ")");
+            } else {
+                emit(c, "(");
+                compile_expr(c, n->left);
+                emit(c, " %s ", n->value ? n->value : "+");
+                compile_expr(c, n->right);
+                emit(c, ")");
+            }
         }
         else if (c->mode == OUT_ASM) {
             compile_expr(c, n->left);
@@ -442,9 +480,15 @@ static void compile_call(Compiler* c, ASTNode* n) {
                     emit(c, "prt%snum(%s);\n", ln?"ln":"", n->left->value);
             }
             else if (n->left && n->left->type == BINARY_OP_NODE) {
-                emit(c, "prt%snum(", ln?"ln":"");
-                compile_expr(c, n->left);
-                emit(c, ");\n");
+                if (is_string_expr_c(c, n->left)) {
+                    emit(c, "prt%s(", ln?"ln":"");
+                    compile_expr(c, n->left);
+                    emit(c, ");\n");
+                } else {
+                    emit(c, "prt%snum(", ln?"ln":"");
+                    compile_expr(c, n->left);
+                    emit(c, ");\n");
+                }
             }
             else if (n->left && n->left->type == ARRAY_ACCESS_NODE) {
                 // Array access returns a number
@@ -532,9 +576,11 @@ static void compile_var(Compiler* c, ASTNode* n, int spanish) {
     
     if (c->mode == OUT_C) {
         indent(c);
-        if (n->left && (n->left->type == STRING_LITERAL_NODE ||
-            (n->left->type == IDENTIFIER_NODE && n->left->value[0]=='"'))) {
-            emit(c, "char* %s = %s;\n", n->value, n->left->value);
+        if (n->left && is_string_expr_c(c, n->left)) {
+            // String variable
+            emit(c, "char* %s = ", n->value);
+            compile_expr(c, n->left);
+            emit(c, ";\n");
             is_str = 1;
         } else if (n->left) {
             emit(c, "int %s = ", n->value);
@@ -744,6 +790,12 @@ static void compile_for(Compiler* c, ASTNode* n) {
                 // Assignment in for loop increment: i = i + 1
                 emit(c, "%s = ", n->extra->right->value ? n->extra->right->value : "");
                 if (n->extra->right->right) compile_expr(c, n->extra->right->right);
+            } else if (n->extra->right->type == INCREMENT_NODE) {
+                // Increment in for loop: i++
+                emit(c, "%s++", n->extra->right->value);
+            } else if (n->extra->right->type == DECREMENT_NODE) {
+                // Decrement in for loop: i--
+                emit(c, "%s--", n->extra->right->value);
             } else {
                 compile_expr(c, n->extra->right);
             }
@@ -896,6 +948,12 @@ static void compile_node_ex(Compiler* c, ASTNode* n, int skip_funcs) {
                 break;
             case CONTINUE_NODE:
                 if (c->mode == OUT_C) { indent(c); emit(c, "continue;\n"); }
+                break;
+            case INCREMENT_NODE:
+                if (c->mode == OUT_C) { indent(c); emit(c, "%s++;\n", n->value); }
+                break;
+            case DECREMENT_NODE:
+                if (c->mode == OUT_C) { indent(c); emit(c, "%s--;\n", n->value); }
                 break;
             default: break;
         }
