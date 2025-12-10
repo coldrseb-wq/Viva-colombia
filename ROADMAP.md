@@ -111,6 +111,12 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Multi-argument function calls
 - ✅ Function hoisting in C output (functions defined outside main())
 - ✅ Function return values (`retorno` keyword) usable in expressions
+- ✅ For loops (`para` keyword) with init/condition/increment
+- ✅ Nested for loops support
+- ✅ Array declarations (`decreto arr[size]`)
+- ✅ Array assignments (`arr[index] = value`)
+- ✅ Array access in expressions (`arr[0] + arr[1]`)
+- ✅ Array access in print statements (`println(arr[0])`)
 
 ### Current Tasks:
 - [ ] Advanced machine code optimization passes
@@ -150,7 +156,7 @@ The Viva compiler has made tremendous progress toward direct machine code compil
 
 The compiler now generates proper platform-specific object files (ELF, Mach-O, PE) that can be linked with system libraries, marking a major milestone toward rivaling Go and Rust for cross-platform direct machine code compilation.
 
-### Verified Working Features (via stress_test.viva, func_test.viva, return_test.viva):
+### Verified Working Features (via stress_test.viva, func_test.viva, return_test.viva, for_test.viva, array_test.viva):
 - Variables and assignments
 - Arithmetic operations (+, -, *, /)
 - Complex expressions with precedence
@@ -158,6 +164,9 @@ The compiler now generates proper platform-specific object files (ELF, Mach-O, P
 - If statements with else blocks
 - Nested conditionals
 - While loops with proper body execution
+- For loops (para) with init/condition/increment
+- Nested for loops
+- Arrays (declaration, assignment, access)
 - String handling and printing
 - Colombian hero functions (bolivar, garcia, etc.)
 - User-defined functions with parameters (fn/cancion)
