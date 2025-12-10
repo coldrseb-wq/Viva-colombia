@@ -70,4 +70,8 @@ stress_out
 stress_out.c
 return_test
 return_test.c
+for_test
+for_test.c
+array_test
+array_test.c
 *.viva.c
