@@ -110,11 +110,11 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Function definitions with parameters (`fn`/`cancion` keywords)
 - ✅ Multi-argument function calls
 - ✅ Function hoisting in C output (functions defined outside main())
+- ✅ Function return values (`retorno` keyword) usable in expressions
 
 ### Current Tasks:
 - [ ] Advanced machine code optimization passes
 - [ ] Memory management in machine code
-- [ ] Return values from user-defined functions
 - [ ] Complete Colombian cultural features
 
 ### Status: IN PROGRESS
@@ -150,7 +150,7 @@ The Viva compiler has made tremendous progress toward direct machine code compil
 
 The compiler now generates proper platform-specific object files (ELF, Mach-O, PE) that can be linked with system libraries, marking a major milestone toward rivaling Go and Rust for cross-platform direct machine code compilation.
 
-### Verified Working Features (via stress_test.viva and func_test.viva):
+### Verified Working Features (via stress_test.viva, func_test.viva, return_test.viva):
 - Variables and assignments
 - Arithmetic operations (+, -, *, /)
 - Complex expressions with precedence
@@ -162,6 +162,7 @@ The compiler now generates proper platform-specific object files (ELF, Mach-O, P
 - Colombian hero functions (bolivar, garcia, etc.)
 - User-defined functions with parameters (fn/cancion)
 - Multi-argument function calls
+- Function return values (retorno) usable in expressions
 
 ## Bootstrapping Path
 The progression toward a fully bootstrapped Viva compiler:

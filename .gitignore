@@ -68,4 +68,6 @@ func_params_test
 func_params_test.c
 stress_out
 stress_out.c
+return_test
+return_test.c
 *.viva.c
