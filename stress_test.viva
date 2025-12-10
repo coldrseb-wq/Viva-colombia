@@ -1,0 +1,86 @@
+// Comprehensive stress test for Viva Colombia compiler
+// Tests all phases: lexer, parser, semantic analysis, code generation
+
+// Test 1: Variable declarations (Spanish and English)
+decreto contador = 0;
+let sum = 100;
+decreto mensaje = "Hola Colombia";
+
+// Test 2: Arithmetic expressions with precedence
+decreto resultado = 2 + 3 * 4;
+decreto complejo = (10 - 5) * (20 / 4);
+
+// Test 3: Nested conditionals
+si (contador == 0) {
+    println("Contador es cero");
+    si (sum > 50) {
+        println("Sum es mayor que 50");
+    }
+}
+
+// Test 4: While loop with counter
+decreto i = 0;
+mientras (i < 5) {
+    println(i);
+    i = i + 1;
+}
+
+// Test 5: Comparison operators
+si (10 > 5) {
+    println("10 > 5");
+}
+si (5 < 10) {
+    println("5 < 10");
+}
+si (10 == 10) {
+    println("10 == 10");
+}
+si (10 != 5) {
+    println("10 != 5");
+}
+
+// Test 6: Assignment after declaration
+contador = 42;
+println(contador);
+
+// Test 7: String variables
+decreto greeting = "Bienvenidos a Colombia";
+println(greeting);
+
+// Test 8: Unary NOT operator
+decreto flag = 1;
+si (no flag) {
+    println("Flag is false");
+} sino {
+    println("Flag is true");
+}
+
+// Test 9: Multiple prints
+println("Line 1");
+println("Line 2");
+println("Line 3");
+
+// Test 10: Hero functions (cultural)
+simon_bolivar();
+francisco_narino();
+maria_cano();
+
+// Test 11: Complex expression
+decreto x = 100;
+decreto y = 50;
+decreto z = x + y * 2 - 10;
+println(z);
+
+// Test 12: Nested while
+decreto outer = 0;
+mientras (outer < 2) {
+    decreto inner = 0;
+    mientras (inner < 3) {
+        println(inner);
+        inner = inner + 1;
+    }
+    outer = outer + 1;
+}
+
+// Final message
+println("Stress test complete!");

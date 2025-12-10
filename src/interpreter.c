@@ -75,9 +75,6 @@ void print_ast(ASTNode* node, int depth) {
         case CONDITION_NODE:
             printf("CONDITION\n");
             break;
-        case ELSE_NODE:
-            printf("ELSE\n");
-            break;
         default:
             printf("UNKNOWN NODE TYPE: %d\n", node->type);
             break;
@@ -91,6 +88,9 @@ void print_ast(ASTNode* node, int depth) {
     }
     if (node->extra) {
         print_ast(node->extra, depth + 1);
+    }
+    if (node->next) {
+        print_ast(node->next, depth);  // Same depth - siblings
     }
 }
 
@@ -127,7 +127,8 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
             ASTNode* current = node->left;
             while (current != NULL) {
                 interpret_ast(current, symbol_table);
-                current = current->right;
+                // Use 'next' for sibling chaining
+                current = current->next;
             }
             break;
         }
@@ -373,13 +374,6 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
                 return interpret_ast(node->left, symbol_table);
             }
             return 0;
-        }
-
-        case ELSE_NODE: {
-            if (node->left) {
-                interpret_ast(node->left, symbol_table);
-            }
-            break;
         }
 
         case STRING_LITERAL_NODE: {

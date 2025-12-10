@@ -132,7 +132,7 @@ TokenStream* tokenize(const char* source) {
         }
         else {
             // Single character tokens
-            char ch[2] = {*current, '\0'};
+            char ch[3] = {*current, '\0', '\0'};
 
             TokenType type;
             switch (*current) {
@@ -142,6 +142,7 @@ TokenStream* tokenize(const char* source) {
                 case '/': type = DIVIDE; break;
                 case '=':
                     if (*(current + 1) == '=') {
+                        ch[1] = '=';  // Store "=="
                         current++; // Skip next '='
                         type = EQUALITY;
                     } else {
@@ -150,6 +151,7 @@ TokenStream* tokenize(const char* source) {
                     break;
                 case '!':
                     if (*(current + 1) == '=') {
+                        ch[1] = '=';  // Store "!="
                         current++; // Skip next '='
                         type = NOT_EQUAL;
                     } else {
@@ -160,6 +162,7 @@ TokenStream* tokenize(const char* source) {
                 case '>': type = GREATER_THAN; break;
                 case '&':
                     if (*(current + 1) == '&') {
+                        ch[1] = '&';  // Store "&&"
                         current++; // Skip next '&'
                         type = Y; // Spanish "and"
                     } else {
@@ -168,6 +171,7 @@ TokenStream* tokenize(const char* source) {
                     break;
                 case '|':
                     if (*(current + 1) == '|') {
+                        ch[1] = '|';  // Store "||"
                         current++; // Skip next '|'
                         type = O; // Spanish "or"
                     } else {

@@ -43,7 +43,6 @@ typedef struct {
 // Forward declarations
 static void compile_node(Compiler* c, ASTNode* n);
 static void compile_expr(Compiler* c, ASTNode* n);
-static void compile_expr_to_rax(Compiler* c, ASTNode* n);
 
 // === EMIT HELPERS ===
 static void emit(Compiler* c, const char* fmt, ...) {
@@ -719,7 +718,7 @@ static void compile_node(Compiler* c, ASTNode* n) {
             case WHILE_NODE: case WHILE_SPANISH_NODE: compile_while(c, n); break;
             case FOR_NODE: case FOR_SPANISH_NODE: compile_for(c, n); break;
             case RETURN_NODE: compile_return(c, n); break;
-            case BREAK_NODE: 
+            case BREAK_NODE:
                 if (c->mode == OUT_C) { indent(c); emit(c, "break;\n"); }
                 break;
             case CONTINUE_NODE:
@@ -727,7 +726,9 @@ static void compile_node(Compiler* c, ASTNode* n) {
                 break;
             default: break;
         }
-        n = n->right;
+
+        // Use 'next' for sibling chaining
+        n = n->next;
     }
 }
 
