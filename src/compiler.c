@@ -372,6 +372,29 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             }
         }
     }
+    else if (n->type == FN_CALL_NODE) {
+        // Function call in expression - emit call and return value is in rax
+        const char* fn = n->value;
+        if (c->mode == OUT_C) {
+            emit(c, "%s(", fn);
+            ASTNode* arg = n->left;
+            int first = 1;
+            while (arg) {
+                if (!first) emit(c, ", ");
+                compile_expr(c, arg);
+                first = 0;
+                arg = arg->right;
+            }
+            emit(c, ")");
+        }
+        else if (c->mode == OUT_ASM) {
+            // For user-defined functions, call them - return value will be in rax
+            emit(c, "    call %s\n", fn);
+        }
+        else if (c->mc) {
+            // TODO: implement machine code call for expressions
+        }
+    }
 }
 // === FUNCTION CALL ===
 static void compile_call(Compiler* c, ASTNode* n) {

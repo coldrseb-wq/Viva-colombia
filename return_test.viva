@@ -1,0 +1,45 @@
+// Test function return values
+
+// Function that returns a value
+fn add(a, b) {
+    retorno a + b;
+}
+
+// Function that returns a computed value
+cancion multiplicar(x, y) {
+    decreto resultado = x * y;
+    retorno resultado;
+}
+
+// Function with conditional return
+fn max(a, b) {
+    si (a > b) {
+        retorno a;
+    }
+    retorno b;
+}
+
+// Main code
+println("=== Return Value Test ===");
+
+// Test simple return
+decreto sum = add(5, 3);
+println("add(5, 3) =");
+println(sum);
+
+// Test computed return
+decreto product = multiplicar(4, 7);
+println("multiplicar(4, 7) =");
+println(product);
+
+// Test conditional return
+decreto maximum = max(10, 20);
+println("max(10, 20) =");
+println(maximum);
+
+// Test using return value directly in expression
+decreto result = add(10, 5) + multiplicar(2, 3);
+println("add(10,5) + multiplicar(2,3) =");
+println(result);
+
+println("=== Test Complete ===");
