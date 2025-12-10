@@ -1,0 +1,92 @@
+// ============================================
+// VIVA COMPILER STRESS TEST - ALL PHASES
+// ============================================
+
+// === PHASE 1-3: Basic Operations ===
+println("=== Phase 1-3: Basic Operations ===");
+
+// Variable declarations (Spanish)
+decreto x = 10;
+decreto y = 20;
+decreto z = x + y;
+println("x + y = ");
+println(z);
+
+// Arithmetic operations
+decreto suma = 5 + 3;
+decreto resta = 10 - 4;
+decreto mult = 6 * 7;
+decreto div = 100 / 5;
+println("5+3=");
+println(suma);
+println("10-4=");
+println(resta);
+println("6*7=");
+println(mult);
+println("100/5=");
+println(div);
+
+// String literals
+println("Hola Colombia!");
+println("Viva la patria!");
+
+// === PHASE 5: Conditionals and Loops ===
+println("=== Phase 5: Conditionals & Loops ===");
+
+// If statement
+decreto num = 15;
+si (num > 10) {
+    println("num is greater than 10");
+} sino {
+    println("num is 10 or less");
+}
+
+// While loop
+println("Counting with mientras:");
+decreto contador = 1;
+mientras (contador <= 5) {
+    println(contador);
+    contador = contador + 1;
+}
+
+// Nested conditionals
+decreto a = 5;
+decreto b = 10;
+si (a < b) {
+    si (a > 0) {
+        println("a is positive and less than b");
+    }
+}
+
+// === PHASE 5: User-defined Functions ===
+println("=== Phase 5: Functions ===");
+
+funcion sumar(p1, p2) {
+    decreto resultado = p1 + p2;
+    println(resultado);
+}
+
+funcion factorial(n) {
+    si (n <= 1) {
+        println(1);
+    } sino {
+        decreto f = 1;
+        decreto i = 2;
+        mientras (i <= n) {
+            f = f * i;
+            i = i + 1;
+        }
+        println(f);
+    }
+}
+
+sumar(100, 200);
+println("Factorial of 5:");
+factorial(5);
+
+// === Colombian Cultural Functions ===
+println("=== Colombian Heroes ===");
+simon_bolivar();
+policarpa();
+
+println("=== All Basic Tests Complete ===");

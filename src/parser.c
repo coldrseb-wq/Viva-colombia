@@ -70,7 +70,8 @@ void free_ast_node(ASTNode* node) {
 // Helper function to check if a token is an operator
 int is_operator(TokenType type) {
     return type == PLUS || type == MINUS || type == MULTIPLY || type == DIVIDE ||
-           type == EQUALITY || type == NOT_EQUAL || type == LESS_THAN || type == GREATER_THAN;
+           type == EQUALITY || type == NOT_EQUAL || type == LESS_THAN || type == GREATER_THAN ||
+           type == LESS_EQUAL || type == GREATER_EQUAL;
 }
 
 // Parse the primary part of an expression (numbers, identifiers, function calls, parenthesized expressions)
@@ -381,6 +382,8 @@ Precedence get_precedence(TokenType type) {
             return PREC_EQUALITY;
         case LESS_THAN:
         case GREATER_THAN:
+        case LESS_EQUAL:
+        case GREATER_EQUAL:
             return PREC_COMPARISON;
         default:
             return PREC_NONE;

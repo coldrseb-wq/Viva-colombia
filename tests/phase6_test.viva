@@ -1,0 +1,31 @@
+// Phase 6 Test: File I/O and Standard Library
+println("=== Phase 6: File I/O ===");
+
+// File operations
+archivo f;
+f = abrir("test_output.txt", "w");
+escribir(f, "Hola desde Viva!");
+cerrar(f);
+println("File written successfully");
+
+// Read it back
+archivo g;
+g = abrir("test_output.txt", "r");
+decreto contenido;
+contenido = leer(g, 100);
+cerrar(g);
+println("File read back");
+
+// Standard library
+println("=== Phase 6: Stdlib ===");
+decreto num = 42;
+decreto neg = 0 - 10;
+decreto absval = absoluto(neg);
+println("abs(-10) = ");
+println(absval);
+
+decreto pot = potencia(2, 8);
+println("pow(2,8) = ");
+println(pot);
+
+println("=== Phase 6 Complete ===");

@@ -1,0 +1,23 @@
+// Minimal Phase Test
+println("=== Testing Basics ===");
+decreto x = 10;
+decreto y = 20;
+decreto z = x + y;
+println(z);
+
+println("=== Testing If ===");
+si (x < y) {
+    println("x < y works!");
+}
+
+println("=== Testing While ===");
+decreto i = 1;
+mientras (i < 4) {
+    println(i);
+    i = i + 1;
+}
+
+println("=== Testing Heroes ===");
+simon_bolivar();
+
+println("=== Done ===");

@@ -1,0 +1,41 @@
+// Phase 7 Test: Arrays, Structs, Dynamic Memory
+println("=== Phase 7: Arrays ===");
+
+// Array with size declaration
+decreto arr[5];
+arr[0] = 10;
+arr[1] = 20;
+arr[2] = 30;
+println("arr[0] = ");
+println(arr[0]);
+println("arr[1] = ");
+println(arr[1]);
+
+// Array initialization
+decreto nums = [1, 2, 3, 4, 5];
+println("nums[2] = ");
+println(nums[2]);
+
+println("=== Phase 7: Structs ===");
+
+// Struct declaration
+estructura Persona {
+    edad;
+    altura;
+}
+
+// Struct instance
+nuevo Persona juan;
+juan.edad = 25;
+juan.altura = 180;
+println("juan.edad = ");
+println(juan.edad);
+println("juan.altura = ");
+println(juan.altura);
+
+println("=== Phase 7: Dynamic Memory ===");
+decreto ptr = reservar(100);
+liberar(ptr);
+println("Memory allocated and freed");
+
+println("=== Phase 7 Complete ===");
