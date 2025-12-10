@@ -1,0 +1,98 @@
+// Stress Test for Viva Compiler - Basic Features
+
+// === VARIABLE DECLARATIONS ===
+decreto a = 10;
+decreto b = 20;
+decreto c = 0;
+
+// === ARITHMETIC EXPRESSIONS ===
+c = a + b;
+println(c);
+
+c = b - a;
+println(c);
+
+c = a * b;
+println(c);
+
+c = b / a;
+println(c);
+
+// Complex expressions
+c = (a + b) * 2;
+println(c);
+
+c = a + b * 2;
+println(c);
+
+c = (10 + 5) * (3 - 1);
+println(c);
+
+// === COMPARISON OPERATIONS ===
+si (a < b) {
+    println("a < b: PASS");
+}
+
+si (b > a) {
+    println("b > a: PASS");
+}
+
+si (a == 10) {
+    println("a == 10: PASS");
+}
+
+// === IF-ELSE CONDITIONALS ===
+decreto x = 5;
+si (x > 10) {
+    println("x > 10");
+} sino {
+    println("x not > 10: PASS");
+}
+
+// Nested conditionals
+si (a > 0) {
+    si (b > 0) {
+        println("Both positive: PASS");
+    }
+}
+
+// === WHILE LOOPS ===
+decreto counter = 3;
+mientras (counter > 0) {
+    println(counter);
+    counter = counter - 1;
+}
+println("Loop done: PASS");
+
+// Sum loop
+decreto sum = 0;
+decreto i = 1;
+mientras (i < 6) {
+    sum = sum + i;
+    i = i + 1;
+}
+println("Sum 1-5:");
+println(sum);
+
+// === STRING HANDLING ===
+println("String test");
+decreto msg = "Hello from variable";
+println(msg);
+
+// === HERO FUNCTIONS ===
+bolivar();
+garcia();
+
+// === MIXED OPERATIONS ===
+decreto result = 0;
+decreto val = 100;
+
+si (val > 50) {
+    result = val * 2;
+} sino {
+    result = val / 2;
+}
+println(result);
+
+// === FINAL STATUS ===
+println("=== STRESS TEST COMPLETE ===");

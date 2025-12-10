@@ -11,6 +11,7 @@ ASTNode* init_ast_node(NodeType type) {
     node->type = type;
     node->left = NULL;
     node->right = NULL;
+    node->body = NULL;
     node->extra = NULL;
     node->value = NULL;
     return node;
@@ -23,16 +24,18 @@ void free_ast_node(ASTNode* node) {
 
         // Only proceed with freeing if the type looks valid
         // This prevents freeing corrupted memory structures
-        if (type >= PROGRAM_NODE && type <= CONDITION_NODE) {
+        if (type >= PROGRAM_NODE && type <= ELSE_NODE) {
             // To handle potential circular references, set pointers to NULL before freeing
             // to avoid accessing memory after it's freed
             ASTNode* left = node->left;
             ASTNode* right = node->right;
+            ASTNode* body = node->body;
             ASTNode* extra = node->extra;
 
             // Set to NULL before recursively freeing to avoid issues with circular references
             node->left = NULL;
             node->right = NULL;
+            node->body = NULL;
             node->extra = NULL;
 
             // Free the subtrees
@@ -41,6 +44,9 @@ void free_ast_node(ASTNode* node) {
             }
             if (right != NULL) {
                 free_ast_node(right);
+            }
+            if (body != NULL) {
+                free_ast_node(body);
             }
             if (extra != NULL) {
                 free_ast_node(extra);
@@ -372,7 +378,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                     // Create if node
                     node = init_ast_node(IF_SPANISH_NODE);
                     node->left = condition;   // condition
-                    node->right = then_body;  // then block body
+                    node->body = then_body;   // then block body (use body field, not right)
 
                     // Check for 'sino' (else) clause after the if block
                     if (*pos < tokens->count && tokens->tokens[*pos]->type == SINO) {
@@ -410,14 +416,8 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                                 (*pos)++; // skip '}'
                             }
 
-                            // For if-else, we need a way to store both then and else blocks
-                            // We'll create a special structure where:
-                            // node->right (already set to then_body) gets replaced with a new node
-                            // This new node has left=then_body, right=else_body
-                            ASTNode* then_else_node = init_ast_node(IF_SPANISH_NODE); // Reusing type for internal structure
-                            then_else_node->left = then_body;  // then block
-                            then_else_node->right = else_body;  // else block
-                            node->right = then_else_node;      // Update the original node
+                            // Store else body in extra field
+                            node->extra = else_body;
                         }
                     }
                 } else {
@@ -483,7 +483,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                     // Create while node
                     node = init_ast_node(WHILE_SPANISH_NODE);
                     node->left = condition;  // condition
-                    node->right = loop_body; // loop body
+                    node->body = loop_body;  // loop body (use body field, not right)
                 } else {
                     // Create while node with just condition if no block found
                     node = init_ast_node(WHILE_SPANISH_NODE);

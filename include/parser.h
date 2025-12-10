@@ -35,9 +35,10 @@ typedef enum {
 typedef struct ASTNode {
     NodeType type;
     char* value;
-    struct ASTNode* left;   // Left child
-    struct ASTNode* right;  // Right child or next statement
-    struct ASTNode* extra;  // Extra child (for else clauses, for loop components)
+    struct ASTNode* left;   // Left child (condition for control flow)
+    struct ASTNode* right;  // Next sibling statement
+    struct ASTNode* body;   // Body for control flow (if/while/for/function)
+    struct ASTNode* extra;  // Extra child (for else clauses, for loop increment)
 } ASTNode;
 
 ASTNode* init_ast_node(NodeType type);

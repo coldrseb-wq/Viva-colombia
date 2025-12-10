@@ -536,11 +536,11 @@ static void compile_assign(Compiler* c, ASTNode* n) {
 static void compile_if(Compiler* c, ASTNode* n) {
     static int lbl = 0;
     int id = lbl++;
-    
+
     if (c->mode == OUT_C) {
         indent(c); emit(c, "if ("); compile_expr(c, n->left); emit(c, ") {\n");
         c->indent++;
-        compile_node(c, n->right);
+        compile_node(c, n->body);
         c->indent--;
         indent(c); emit(c, "}");
         if (n->extra) {
@@ -555,7 +555,7 @@ static void compile_if(Compiler* c, ASTNode* n) {
     else if (c->mode == OUT_ASM) {
         compile_expr(c, n->left);
         emit(c, "    cmp rax, 0\n    je .Lelse%d\n", id);
-        compile_node(c, n->right);
+        compile_node(c, n->body);
         emit(c, "    jmp .Lend%d\n.Lelse%d:\n", id, id);
         if (n->extra) compile_node(c, n->extra);
         emit(c, ".Lend%d:\n", id);
@@ -563,20 +563,20 @@ static void compile_if(Compiler* c, ASTNode* n) {
     else if (c->mc) {
         compile_expr(c, n->left);
         encode_cmp_rax_zero(c->mc);
-        
+
         int je_pos = c->mc->size;
         encode_je_rel32(c->mc, 0);  // placeholder
-        
-        compile_node(c, n->right);
-        
+
+        compile_node(c, n->body);
+
         int jmp_pos = c->mc->size;
         encode_jmp_rel32(c->mc, 0);  // placeholder
-        
+
         int else_pos = c->mc->size;
         patch_jump_offset(c->mc, je_pos + 2, else_pos);
-        
+
         if (n->extra) compile_node(c, n->extra);
-        
+
         int end_pos = c->mc->size;
         patch_jump_offset(c->mc, jmp_pos + 1, end_pos);
     }
@@ -586,11 +586,11 @@ static void compile_if(Compiler* c, ASTNode* n) {
 static void compile_while(Compiler* c, ASTNode* n) {
     static int lbl = 0;
     int id = lbl++;
-    
+
     if (c->mode == OUT_C) {
         indent(c); emit(c, "while ("); compile_expr(c, n->left); emit(c, ") {\n");
         c->indent++;
-        compile_node(c, n->right);
+        compile_node(c, n->body);
         c->indent--;
         indent(c); emit(c, "}\n");
     }
@@ -598,24 +598,24 @@ static void compile_while(Compiler* c, ASTNode* n) {
         emit(c, ".Lw%d:\n", id);
         compile_expr(c, n->left);
         emit(c, "    cmp rax,0\n    je .Lwe%d\n", id);
-        compile_node(c, n->right);
+        compile_node(c, n->body);
         emit(c, "    jmp .Lw%d\n.Lwe%d:\n", id, id);
     }
     else if (c->mc) {
         int start_pos = c->mc->size;
-        
+
         compile_expr(c, n->left);
         encode_cmp_rax_zero(c->mc);
-        
+
         int je_pos = c->mc->size;
         encode_je_rel32(c->mc, 0);  // placeholder
-        
-        compile_node(c, n->right);
-        
+
+        compile_node(c, n->body);
+
         int jmp_pos = c->mc->size;
         encode_jmp_rel32(c->mc, 0);  // placeholder
         patch_jump_offset(c->mc, jmp_pos + 1, start_pos);
-        
+
         int end_pos = c->mc->size;
         patch_jump_offset(c->mc, je_pos + 2, end_pos);
     }
@@ -625,7 +625,7 @@ static void compile_while(Compiler* c, ASTNode* n) {
 static void compile_for(Compiler* c, ASTNode* n) {
     static int lbl = 0;
     int id = lbl++;
-    
+
     if (c->mode == OUT_C) {
         indent(c); emit(c, "for (");
         if (n->left) compile_expr(c, n->left);
@@ -635,7 +635,7 @@ static void compile_for(Compiler* c, ASTNode* n) {
         if (n->extra && n->extra->right) compile_expr(c, n->extra->right);
         emit(c, ") {\n");
         c->indent++;
-        compile_node(c, n->right);
+        compile_node(c, n->body);
         c->indent--;
         indent(c); emit(c, "}\n");
     }
@@ -646,15 +646,15 @@ static void compile_for(Compiler* c, ASTNode* n) {
             compile_expr(c, n->extra->left);
             emit(c, "    cmp rax,0\n    je .Lfe%d\n", id);
         }
-        compile_node(c, n->right);
+        compile_node(c, n->body);
         if (n->extra && n->extra->right) compile_node(c, n->extra->right);
         emit(c, "    jmp .Lf%d\n.Lfe%d:\n", id, id);
     }
     else if (c->mc) {
         if (n->left) compile_node(c, n->left);
-        
+
         int start_pos = c->mc->size;
-        
+
         int je_pos = -1;
         if (n->extra && n->extra->left) {
             compile_expr(c, n->extra->left);
@@ -662,15 +662,15 @@ static void compile_for(Compiler* c, ASTNode* n) {
             je_pos = c->mc->size;
             encode_je_rel32(c->mc, 0);
         }
-        
-        compile_node(c, n->right);
-        
+
+        compile_node(c, n->body);
+
         if (n->extra && n->extra->right) compile_node(c, n->extra->right);
-        
+
         int jmp_pos = c->mc->size;
         encode_jmp_rel32(c->mc, 0);
         patch_jump_offset(c->mc, jmp_pos + 1, start_pos);
-        
+
         if (je_pos >= 0) {
             int end_pos = c->mc->size;
             patch_jump_offset(c->mc, je_pos + 2, end_pos);
@@ -702,24 +702,24 @@ static void compile_return(Compiler* c, ASTNode* n) {
 // === FUNCTION DECLARATION ===
 static void compile_func(Compiler* c, ASTNode* n) {
     const char* name = n->value ? n->value : "func";
-    
+
     if (c->mode == OUT_C) {
         emit(c, "int %s() {\n", name);
         c->indent++;
-        compile_node(c, n->right);
+        compile_node(c, n->body);
         c->indent--;
         emit(c, "    return 0;\n}\n\n");
     }
     else if (c->mode == OUT_ASM) {
         emit(c, "%s:\n    push rbp\n    mov rbp,rsp\n    sub rsp,256\n", name);
-        compile_node(c, n->right);
+        compile_node(c, n->body);
         emit(c, "    xor rax,rax\n    leave\n    ret\n\n");
     }
     else if (c->mc) {
         encode_push_rbp(c->mc);
         encode_mov_rbp_rsp(c->mc);
         encode_sub_rsp_imm8(c->mc, 128);
-        compile_node(c, n->right);
+        compile_node(c, n->body);
         encode_xor_rax_rax(c->mc);
         encode_leave(c->mc);
         encode_ret(c->mc);

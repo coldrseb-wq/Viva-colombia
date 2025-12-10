@@ -296,7 +296,7 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
         case IF_NODE: {
             int condition = interpret_ast(node->left, symbol_table);
             if (condition) {
-                interpret_ast(node->right, symbol_table);
+                interpret_ast(node->body, symbol_table);
             } else if (node->extra) {
                 interpret_ast(node->extra, symbol_table);
             }
@@ -306,7 +306,7 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
         case WHILE_SPANISH_NODE:
         case WHILE_NODE: {
             while (interpret_ast(node->left, symbol_table)) {
-                interpret_ast(node->right, symbol_table);
+                interpret_ast(node->body, symbol_table);
             }
             break;
         }
@@ -316,22 +316,22 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
             if (node->left) {
                 interpret_ast(node->left, symbol_table);
             }
-            
+
             if (node->extra) {
                 ASTNode* condition_node = node->extra->left;
                 ASTNode* increment_node = node->extra->right;
-                
+
                 while (condition_node == NULL || interpret_ast(condition_node, symbol_table)) {
-                    interpret_ast(node->right, symbol_table);
-                    
+                    interpret_ast(node->body, symbol_table);
+
                     if (increment_node) {
                         interpret_ast(increment_node, symbol_table);
                     }
-                    
+
                     if (condition_node == NULL) break;
                 }
             } else {
-                interpret_ast(node->right, symbol_table);
+                interpret_ast(node->body, symbol_table);
             }
             break;
         }
