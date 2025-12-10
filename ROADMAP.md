@@ -77,7 +77,7 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 
 ### Status: COMPLETED
 
-## Phase 5: Cross-Platform Optimization & Advanced Features (IN PROGRESS)
+## Phase 5: Cross-Platform Optimization & Advanced Features (COMPLETED)
 ### Objectives:
 - Advanced cross-compilation capability with full platform feature parity
 - Performance optimization
@@ -98,16 +98,115 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Complete expression evaluation in machine code including comparison operations
 - ✅ Proper conditional jump handling with offset calculation in ELF mode
 - ✅ Assignment operation fixes for all output modes
+- ✅ Comments in source code (// style)
+- ✅ User-defined function declarations (parsing)
+- ✅ Return statements with values
 
-### Current Tasks:
-- [ ] Advanced machine code optimization passes
-- [ ] Memory management in machine code
-- [ ] Function definition support in machine code
-- [ ] Complete Colombian cultural features
+### Status: COMPLETED
+
+---
+
+## Phase 6: Bootstrap Language Features (IN PROGRESS)
+### Objectives:
+- Implement all language features required to write a Viva compiler in Viva
+- Remove libc dependency by using raw syscalls
+- Enable self-hosting compilation
+
+### Priority 1: Core Language Features
+#### Function System (Critical)
+- [ ] **Function parameters in codegen** - `compile_func()` currently ignores parameter list (`n->left`)
+- [ ] **User function calls with arguments** - Only builtins work, need to pass args to user functions
+- [ ] **Local variable scoping** - Proper stack frames per function
+- [ ] **Recursive function support** - Call stack management
+
+#### Data Structures (Critical)
+- [ ] **Arrays with indexing** - Parser exists (`parser.c:135`), needs codegen
+  - Array declaration: `decreto arr[10];`
+  - Array access: `arr[i]`
+  - Array assignment: `arr[i] = value;`
+- [ ] **Structs/Records** - New feature needed
+  - Struct definition: `estructura Token { tipo; valor; }`
+  - Field access: `token.tipo`
+  - Struct allocation
+
+#### String Operations
+- [ ] **String length** - `longitud(str)`
+- [ ] **String comparison** - `comparar(str1, str2)`
+- [ ] **String concatenation** - `concatenar(str1, str2)`
+- [ ] **Character access** - `str[i]`
+
+### Priority 2: Low-Level System Access
+#### Raw Syscalls (Remove libc dependency)
+- [ ] **Wire up syscall instruction** - `encode_syscall()` exists in `machine_code.c:426` but unused!
+- [ ] **write() syscall** - Replace printf with `syscall(1, fd, buf, len)`
+- [ ] **read() syscall** - File input `syscall(0, fd, buf, len)`
+- [ ] **open() syscall** - File handling `syscall(2, path, flags, mode)`
+- [ ] **close() syscall** - `syscall(3, fd)`
+- [ ] **exit() syscall** - `syscall(60, code)`
+
+#### Memory Management
+- [ ] **mmap() syscall** - Heap allocation `syscall(9, addr, len, prot, flags, fd, off)`
+- [ ] **munmap() syscall** - Free memory
+- [ ] **Simple allocator** - Basic malloc/free in Viva
+
+### Priority 3: Additional Operators
+#### Bitwise Operators
+- [ ] **Bitwise AND** - `&`
+- [ ] **Bitwise OR** - `|`
+- [ ] **Bitwise XOR** - `^`
+- [ ] **Bitwise NOT** - `~`
+
+#### Shift Operators
+- [ ] **Left shift** - `<<`
+- [ ] **Right shift** - `>>`
+
+#### Pointer Operations
+- [ ] **Address-of** - `&variable`
+- [ ] **Dereference** - `*pointer`
+- [ ] **Pointer arithmetic** - `ptr + offset`
+
+### Machine Code Implementation Status:
+| Feature | Parsed | C Output | ASM Output | Machine Code |
+|---------|--------|----------|------------|--------------|
+| Function params | ✅ | ❌ | ❌ | ❌ |
+| User fn calls | ❌ | ❌ | ❌ | ❌ |
+| Arrays | ✅ | ❌ | ❌ | ❌ |
+| Structs | ❌ | ❌ | ❌ | ❌ |
+| Bitwise ops | ❌ | ❌ | ❌ | ❌ |
+| Shifts | ❌ | ❌ | ❌ | ❌ |
+| Syscalls | N/A | N/A | N/A | ❌ (encoder exists) |
 
 ### Status: IN PROGRESS
 
-## Phase 6: Final Implementation & Testing (PLANNED)
+---
+
+## Phase 7: Self-Hosting Compiler (PLANNED)
+### Objectives:
+- Write Viva compiler in Viva language
+- Achieve true bootstrap (no C dependency)
+- Viva compiles itself to machine code
+
+### Planned Tasks:
+- [ ] Implement lexer in Viva (`lexer.viva`)
+- [ ] Implement parser in Viva (`parser.viva`)
+- [ ] Implement code generator in Viva (`codegen.viva`)
+- [ ] Implement ELF/Mach-O/PE writer in Viva
+- [ ] Self-compilation test (compile Viva compiler with itself)
+- [ ] Bootstrap verification (3-stage bootstrap)
+
+### Bootstrap Process:
+```
+Stage 1: C compiler compiles viva_compiler.viva → viva_compiler_v1
+Stage 2: viva_compiler_v1 compiles viva_compiler.viva → viva_compiler_v2
+Stage 3: viva_compiler_v2 compiles viva_compiler.viva → viva_compiler_v3
+Verify: viva_compiler_v2 == viva_compiler_v3 (byte-identical)
+```
+
+### Status: PLANNED
+
+---
+
+## Phase 8: Final Implementation & Testing (PLANNED)
 ### Objectives:
 - Full machine code compilation
 - Multi-platform testing
@@ -123,27 +222,67 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 ### Status: PLANNED
 
 ## Current State Summary
-The Viva compiler has made tremendous progress toward direct machine code compilation rivaling Go and Rust:
+The Viva compiler has made tremendous progress toward direct machine code compilation:
+
+### Completed (Phases 1-5):
 - ✅ Successfully transitioned from C-code to assembly generation
 - ✅ Implemented proper ELF object file generation with complete section headers
 - ✅ Implemented proper Mach-O object file generation for macOS
 - ✅ Implemented basic PE/COFF object file generation for Windows
 - ✅ Created symbol table and relocation infrastructure for external function calls
 - ✅ Generated basic x86-64 machine code with proper instruction encoding
-- ✅ Established foundation for optimization passes and advanced features
 - ✅ Cross-compilation capability: Generate code for Linux, macOS, and Windows from any platform
-- ✅ Command-line interface supporting cross-platform targeting with `-e -p [platform]` flags
+- ✅ Control flow (if/else, while, for) in machine code
+- ✅ Expression evaluation with all arithmetic and comparison operators
 
-The compiler now generates proper platform-specific object files (ELF, Mach-O, PE) that can be linked with system libraries, marking a major milestone toward rivaling Go and Rust for cross-platform direct machine code compilation.
+### Current Blocker (Phase 6):
+The compiler is written in **~3,500 lines of C**. To achieve bootstrap, we must first implement:
+- ❌ Function parameters (codegen ignores them)
+- ❌ Arrays (parsed but no codegen)
+- ❌ Structs (not implemented)
+- ❌ Raw syscalls (encoder exists but unused)
+- ❌ Memory management
+
+### Key Discovery:
+`encode_syscall()` exists in `machine_code.c:426` but is **never called** from `compiler.c`. Wiring this up enables libc-free I/O.
 
 ## Bootstrapping Path
-The progression toward a fully bootstrapped Viva compiler:
-1. **Phase 1-4**: Current C-written compiler enhanced to generate direct machine code (steps in this roadmap) - **MAJOR MILESTONES ACHIEVED**
-2. **Future Phase**: Use this machine code generating compiler to create a Viva compiler written in Viva itself
-3. **Final Goal**: Viva compiler (written in Viva) that generates direct machine code - achieving true bootstrapping
+```
+Current State:
+┌─────────────────────────────┐
+│  C Compiler (3,500 LOC)     │  ← We are here
+│  Generates: ELF/Mach-O/PE   │
+│  Missing: params, arrays,   │
+│           structs, syscalls │
+└─────────────────────────────┘
+            │
+            ▼ Phase 6: Add missing features
+┌─────────────────────────────┐
+│  C Compiler (enhanced)      │
+│  Can compile complex Viva   │
+│  programs with all features │
+└─────────────────────────────┘
+            │
+            ▼ Phase 7: Write compiler in Viva
+┌─────────────────────────────┐
+│  viva_compiler.viva         │
+│  Lexer + Parser + Codegen   │
+│  Written entirely in Viva   │
+└─────────────────────────────┘
+            │
+            ▼ Bootstrap!
+┌─────────────────────────────┐
+│  Self-Hosting Compiler      │
+│  Viva compiles itself       │
+│  No C dependency            │
+└─────────────────────────────┘
+```
 
 ## Next Critical Steps
-1. Complete advanced machine code optimization passes
-2. Enhance PE/COFF format with full COFF section structure
-3. Develop comprehensive runtime system with memory management
-4. Add complete expression evaluation and control flow in machine code
+1. **Function parameters** - Wire up `n->left` in `compile_func()`
+2. **User function calls** - Generate call instructions with argument passing
+3. **Array codegen** - Implement array operations in `compile_node()`
+4. **Syscall integration** - Connect `encode_syscall()` to compiler
+5. **Struct support** - Add parsing and codegen for structs
+6. **Write viva_compiler.viva** - Full compiler in Viva language
+7. **Bootstrap test** - Compile Viva compiler with itself
