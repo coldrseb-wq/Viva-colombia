@@ -28,7 +28,19 @@ typedef enum {
     ARRAY_ACCESS_NODE,      // For array access operations (arr[index])
     ARRAY_DECL_NODE,        // For array declarations and assignments
     UNARY_OP_NODE,          // For unary operations like ! (not)
-    CONDITION_NODE          // For condition expressions
+    CONDITION_NODE,         // For condition expressions
+    // File I/O nodes (Phase 6)
+    FILE_OPEN_NODE,         // For file open operations
+    FILE_CLOSE_NODE,        // For file close operations
+    FILE_READ_NODE,         // For file read operations
+    FILE_WRITE_NODE,        // For file write operations
+    FILE_DECL_NODE,         // For file variable declarations
+    // Standard library nodes
+    STRLEN_NODE,            // String length
+    CONCAT_NODE,            // String concatenation
+    ABS_NODE,               // Absolute value
+    POW_NODE,               // Power/exponentiation
+    SQRT_NODE               // Square root
 } NodeType;
 
 typedef struct ASTNode {

@@ -75,6 +75,38 @@ void print_ast(ASTNode* node, int depth) {
         case CONDITION_NODE:
             printf("CONDITION\n");
             break;
+        // File I/O nodes (Phase 6)
+        case FILE_OPEN_NODE:
+            printf("FILE_OPEN\n");
+            break;
+        case FILE_CLOSE_NODE:
+            printf("FILE_CLOSE\n");
+            break;
+        case FILE_READ_NODE:
+            printf("FILE_READ\n");
+            break;
+        case FILE_WRITE_NODE:
+            printf("FILE_WRITE\n");
+            break;
+        case FILE_DECL_NODE:
+            printf("FILE_DECL: %s\n", node->value ? node->value : "(null)");
+            break;
+        // Standard library nodes
+        case STRLEN_NODE:
+            printf("STRLEN\n");
+            break;
+        case CONCAT_NODE:
+            printf("CONCAT\n");
+            break;
+        case ABS_NODE:
+            printf("ABS\n");
+            break;
+        case POW_NODE:
+            printf("POW\n");
+            break;
+        case SQRT_NODE:
+            printf("SQRT\n");
+            break;
         default:
             printf("UNKNOWN NODE TYPE: %d\n", node->type);
             break;

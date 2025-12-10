@@ -40,6 +40,19 @@ typedef enum {
     NO,             // Spanish for "not" (!)
     LBRACKET,       // Left bracket [
     RBRACKET,       // Right bracket ]
+    // File I/O tokens (Phase 6)
+    ABRIR,          // Spanish for "open" - file open
+    CERRAR,         // Spanish for "close" - file close
+    LEER,           // Spanish for "read" - file read
+    ESCRIBIR,       // Spanish for "write" - file write
+    ARCHIVO,        // Spanish for "file" - file type
+    // Standard library tokens
+    LONGITUD,       // Spanish for "length" - string length
+    CONCATENAR,     // Spanish for "concatenate" - string concat
+    ABSOLUTO,       // Spanish for "absolute" - abs value
+    POTENCIA,       // Spanish for "power" - exponentiation
+    RAIZ,           // Spanish for "root" - square root
+    MODULO,         // Modulo operation
     UNKNOWN
 } TokenType;
 

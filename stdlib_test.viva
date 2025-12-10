@@ -1,0 +1,31 @@
+// Standard Library Test in Viva
+// Testing math and string functions
+
+println("=== Standard Library Test ===");
+
+// Test string length (longitud)
+decreto texto = "Colombia";
+decreto len = longitud(texto);
+println("Length of 'Colombia':");
+println(len);
+
+// Test absolute value (absoluto)
+decreto negativo = -42;
+decreto pos = absoluto(negativo);
+println("Absolute value of -42:");
+println(pos);
+
+// Test power (potencia)
+decreto base = 2;
+decreto exp = 10;
+decreto resultado = potencia(base, exp);
+println("2^10 =");
+println(resultado);
+
+// Test square root (raiz)
+decreto numero = 144;
+decreto raiz_cuadrada = raiz(numero);
+println("Square root of 144:");
+println(raiz_cuadrada);
+
+println("=== Test Complete ===");

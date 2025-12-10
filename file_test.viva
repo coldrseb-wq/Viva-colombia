@@ -1,0 +1,26 @@
+// File I/O test program in Viva
+// Using Spanish keywords for Colombian flavor
+
+println("=== File I/O Test ===");
+
+// Declare a file variable and open it for writing
+archivo salida = abrir("test_output.txt", "w");
+
+// Write content to the file
+escribir(salida, "Hola desde Viva Colombia!");
+
+// Close the file
+cerrar(salida);
+
+println("File written successfully!");
+
+// Now open the file for reading
+archivo entrada = abrir("test_output.txt", "r");
+
+// Read from file (simplified - reads one character)
+decreto c = leer(entrada);
+
+// Close the file
+cerrar(entrada);
+
+println("File I/O test complete!");

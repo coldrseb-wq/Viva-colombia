@@ -61,3 +61,8 @@ backup_*
 # Generated test files
 func_test.c
 func_test_exe
+file_test_exe
+stdlib_test_exe
+test_output.txt
+stdlib_test.c
+file_test.c

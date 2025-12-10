@@ -24,7 +24,7 @@ void free_ast_node(ASTNode* node) {
 
         // Only proceed with freeing if the type looks valid
         // This prevents freeing corrupted memory structures
-        if (type >= PROGRAM_NODE && type <= CONDITION_NODE) {
+        if (type >= PROGRAM_NODE && type <= SQRT_NODE) {
             // To handle potential circular references, set pointers to NULL before freeing
             // to avoid accessing memory after it's freed
             ASTNode* left = node->left;
@@ -82,7 +82,7 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
     Token* current_token = tokens->tokens[*pos];
     ASTNode* node = NULL;
 
-    // Handle unary operators (like "no" for NOT)
+    // Handle unary operators (like "no" for NOT, "-" for negation)
     if (current_token->type == NO) {
         (*pos)++;  // skip 'no' token
         // Parse the operand for the unary operator
@@ -96,7 +96,105 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
         return node;
     }
 
-    if (current_token->type == NUMBER) {
+    // Handle unary minus for negative numbers
+    if (current_token->type == MINUS) {
+        (*pos)++;  // skip '-' token
+        ASTNode* operand = parse_primary(tokens, pos);
+
+        if (operand != NULL) {
+            node = init_ast_node(UNARY_OP_NODE);
+            node->value = strdup("-");  // unary minus
+            node->right = operand;
+        }
+        return node;
+    }
+
+    // Handle abrir() as expression (returns file pointer)
+    if (current_token->type == ABRIR) {
+        (*pos)++; // skip 'abrir'
+        node = init_ast_node(FILE_OPEN_NODE);
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++; // skip '('
+            node->left = parse_expression(tokens, pos); // filename
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == COMMA) {
+                (*pos)++;
+            }
+            node->right = parse_expression(tokens, pos); // mode
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+        return node;
+    }
+    // Handle leer() as expression (returns read value)
+    else if (current_token->type == LEER) {
+        (*pos)++; // skip 'leer'
+        node = init_ast_node(FILE_READ_NODE);
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++; // skip '('
+            node->left = parse_expression(tokens, pos); // file handle
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+        return node;
+    }
+    // Handle standard library functions as expressions
+    else if (current_token->type == LONGITUD) {
+        (*pos)++;
+        node = init_ast_node(STRLEN_NODE);
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++;
+            node->left = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+        return node;
+    }
+    else if (current_token->type == ABSOLUTO) {
+        (*pos)++;
+        node = init_ast_node(ABS_NODE);
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++;
+            node->left = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+        return node;
+    }
+    else if (current_token->type == POTENCIA) {
+        (*pos)++;
+        node = init_ast_node(POW_NODE);
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++;
+            node->left = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == COMMA) {
+                (*pos)++;
+            }
+            node->right = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+        return node;
+    }
+    else if (current_token->type == RAIZ) {
+        (*pos)++;
+        node = init_ast_node(SQRT_NODE);
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++;
+            node->left = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+        return node;
+    }
+    else if (current_token->type == NUMBER) {
         node = init_ast_node(NUMBER_NODE);
         node->value = strdup(current_token->value);
         (*pos)++;
@@ -748,6 +846,119 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
         // Check and consume semicolon if present
         if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
             (*pos)++; // skip semicolon
+        }
+        return node;
+    } else if (current_token->type == ARCHIVO) {
+        // Handle file declaration: archivo f = abrir("filename", "mode");
+        (*pos)++; // skip 'archivo'
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == IDENTIFIER) {
+            char* file_var = strdup(tokens->tokens[*pos]->value);
+            (*pos)++; // skip variable name
+
+            node = init_ast_node(FILE_DECL_NODE);
+            node->value = file_var;
+
+            // Check for assignment
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+                (*pos)++; // skip '='
+                node->left = parse_expression(tokens, pos);
+            }
+
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                (*pos)++;
+            }
+            return node;
+        }
+    } else if (current_token->type == ABRIR) {
+        // Handle file open: abrir("filename", "mode")
+        (*pos)++; // skip 'abrir'
+
+        node = init_ast_node(FILE_OPEN_NODE);
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++; // skip '('
+
+            // Parse filename argument
+            node->left = parse_expression(tokens, pos);
+
+            // Skip comma
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == COMMA) {
+                (*pos)++;
+            }
+
+            // Parse mode argument
+            node->right = parse_expression(tokens, pos);
+
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+            (*pos)++;
+        }
+        return node;
+    } else if (current_token->type == CERRAR) {
+        // Handle file close: cerrar(f);
+        (*pos)++; // skip 'cerrar'
+
+        node = init_ast_node(FILE_CLOSE_NODE);
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++; // skip '('
+            node->left = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+            (*pos)++;
+        }
+        return node;
+    } else if (current_token->type == LEER) {
+        // Handle file read: leer(f) or leer(f, buffer, size)
+        (*pos)++; // skip 'leer'
+
+        node = init_ast_node(FILE_READ_NODE);
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++; // skip '('
+            node->left = parse_expression(tokens, pos); // file handle
+
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+            (*pos)++;
+        }
+        return node;
+    } else if (current_token->type == ESCRIBIR) {
+        // Handle file write: escribir(f, "content");
+        (*pos)++; // skip 'escribir'
+
+        node = init_ast_node(FILE_WRITE_NODE);
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++; // skip '('
+            node->left = parse_expression(tokens, pos); // file handle
+
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == COMMA) {
+                (*pos)++;
+            }
+
+            node->right = parse_expression(tokens, pos); // content to write
+
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
+        }
+
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+            (*pos)++;
         }
         return node;
     } else if (current_token->type == IDENTIFIER) {

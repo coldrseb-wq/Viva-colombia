@@ -97,6 +97,18 @@ TokenStream* tokenize(const char* source) {
             else if (strcmp(buffer, "while") == 0 || strcmp(buffer, "mientras") == 0) type = MIENTRAS;
             else if (strcmp(buffer, "not") == 0 || strcmp(buffer, "no") == 0) type = NO; // Spanish "not"
             else if (strcmp(buffer, "return") == 0 || strcmp(buffer, "retorno") == 0) type = RETORNO;
+            // File I/O keywords (Phase 6)
+            else if (strcmp(buffer, "open") == 0 || strcmp(buffer, "abrir") == 0) type = ABRIR;
+            else if (strcmp(buffer, "close") == 0 || strcmp(buffer, "cerrar") == 0) type = CERRAR;
+            else if (strcmp(buffer, "read") == 0 || strcmp(buffer, "leer") == 0) type = LEER;
+            else if (strcmp(buffer, "write") == 0 || strcmp(buffer, "escribir") == 0) type = ESCRIBIR;
+            else if (strcmp(buffer, "file") == 0 || strcmp(buffer, "archivo") == 0) type = ARCHIVO;
+            // Standard library keywords
+            else if (strcmp(buffer, "strlen") == 0 || strcmp(buffer, "longitud") == 0) type = LONGITUD;
+            else if (strcmp(buffer, "concat") == 0 || strcmp(buffer, "concatenar") == 0) type = CONCATENAR;
+            else if (strcmp(buffer, "abs") == 0 || strcmp(buffer, "absoluto") == 0) type = ABSOLUTO;
+            else if (strcmp(buffer, "pow") == 0 || strcmp(buffer, "potencia") == 0) type = POTENCIA;
+            else if (strcmp(buffer, "sqrt") == 0 || strcmp(buffer, "raiz") == 0) type = RAIZ;
 
             add_token(stream, init_token(type, buffer, line));
         }
