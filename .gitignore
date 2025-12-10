@@ -58,3 +58,7 @@ backup_*
 *_fixed.c
 *_fixed.s
 *_simplified.c
+*_fixed
+stress_test.c
+simple_test.c
+simple_test_c
