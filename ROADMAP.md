@@ -124,6 +124,9 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Break and continue keywords (`romper`/`break`, `continuar`/`continue`)
 - ✅ Logical operators (`&&`/`y`, `||`/`o`) fixed in parser precedence
 - ✅ String concatenation with `+` operator (e.g., `"Hola" + " " + "Colombia"`)
+- ✅ File I/O: `read_file`/`leer_archivo`, `write_file`/`escribir_archivo`, `append_file`/`agregar_archivo`
+- ✅ Int-to-string: `str()`/`cadena()` for number to string conversion
+- ✅ String functions: `substr()`/`subcadena()`, `indexof()`/`indice()`, `charat()`/`caracter()`
 
 ### Current Tasks:
 - [ ] Advanced machine code optimization passes
@@ -181,6 +184,9 @@ The compiler now generates proper platform-specific object files (ELF, Mach-O, P
 - String concatenation with + operator
 - String length function (len/largo)
 - Character access in strings
+- Int-to-string conversion (str/cadena)
+- String functions (substr, indexof, charat)
+- File I/O (read_file, write_file, append_file)
 - Colombian hero functions (bolivar, garcia, etc.)
 - User-defined functions with parameters (fn/cancion)
 - Multi-argument function calls

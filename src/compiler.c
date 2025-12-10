@@ -140,6 +140,13 @@ static Compiler* init_compiler(const char* outfile, OutMode mode) {
             "void prtnum(int n){printf(\"%%d\",n);}\n"
             "void prtlnnum(int n){printf(\"%%d\\n\",n);}\n"
             "char* strconcat(char* a, char* b){char* r=malloc(strlen(a)+strlen(b)+1);strcpy(r,a);strcat(r,b);return r;}\n"
+            "char* read_file(char* path){FILE* f=fopen(path,\"r\");if(!f)return \"\";fseek(f,0,SEEK_END);long sz=ftell(f);fseek(f,0,SEEK_SET);char* buf=malloc(sz+1);fread(buf,1,sz,f);buf[sz]=0;fclose(f);return buf;}\n"
+            "int write_file(char* path,char* content){FILE* f=fopen(path,\"w\");if(!f)return 0;fputs(content,f);fclose(f);return 1;}\n"
+            "int append_file(char* path,char* content){FILE* f=fopen(path,\"a\");if(!f)return 0;fputs(content,f);fclose(f);return 1;}\n"
+            "char* int_to_str(int n){char* buf=malloc(32);sprintf(buf,\"%%d\",n);return buf;}\n"
+            "char* substr(char* s,int start,int len){char* r=malloc(len+1);strncpy(r,s+start,len);r[len]=0;return r;}\n"
+            "int indexof(char* s,char c){char* p=strchr(s,c);return p?p-s:-1;}\n"
+            "int charat(char* s,int i){return (int)s[i];}\n"
             "void bolivar(){printf(\"Simon Bolivar: Libertador\\n\");}\n"
             "void narino(){printf(\"Francisco Narino: Heroe\\n\");}\n"
             "void cano(){printf(\"Maria Cano: Lider\\n\");}\n"
@@ -240,8 +247,11 @@ static int is_string_expr_c(Compiler* c, ASTNode* n) {
         return is_string_expr_c(c, n->left) || is_string_expr_c(c, n->right);
     }
     if (n->type == FN_CALL_NODE && n->value) {
-        // len() returns int, strconcat returns string
+        // Functions that return strings
         if (strcmp(n->value, "strconcat") == 0) return 1;
+        if (strcmp(n->value, "read_file") == 0 || strcmp(n->value, "leer_archivo") == 0) return 1;
+        if (strcmp(n->value, "str") == 0 || strcmp(n->value, "cadena") == 0) return 1;
+        if (strcmp(n->value, "substr") == 0 || strcmp(n->value, "subcadena") == 0) return 1;
     }
     return 0;
 }
@@ -436,6 +446,71 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                 if (n->left) compile_expr(c, n->left);
                 emit(c, ")");
             }
+            else if (strcmp(fn, "read_file") == 0 || strcmp(fn, "leer_archivo") == 0) {
+                // Read file function - returns string
+                emit(c, "read_file(");
+                if (n->left) compile_expr(c, n->left);
+                emit(c, ")");
+            }
+            else if (strcmp(fn, "write_file") == 0 || strcmp(fn, "escribir_archivo") == 0) {
+                // Write file function - returns int (success)
+                emit(c, "write_file(");
+                if (n->left) compile_expr(c, n->left);
+                if (n->left && n->left->right) {
+                    emit(c, ", ");
+                    compile_expr(c, n->left->right);
+                }
+                emit(c, ")");
+            }
+            else if (strcmp(fn, "append_file") == 0 || strcmp(fn, "agregar_archivo") == 0) {
+                // Append to file function - returns int (success)
+                emit(c, "append_file(");
+                if (n->left) compile_expr(c, n->left);
+                if (n->left && n->left->right) {
+                    emit(c, ", ");
+                    compile_expr(c, n->left->right);
+                }
+                emit(c, ")");
+            }
+            else if (strcmp(fn, "str") == 0 || strcmp(fn, "cadena") == 0) {
+                // Int to string conversion
+                emit(c, "int_to_str(");
+                if (n->left) compile_expr(c, n->left);
+                emit(c, ")");
+            }
+            else if (strcmp(fn, "substr") == 0 || strcmp(fn, "subcadena") == 0) {
+                // Substring function
+                emit(c, "substr(");
+                ASTNode* arg = n->left;
+                int i = 0;
+                while (arg && i < 3) {
+                    if (i > 0) emit(c, ", ");
+                    compile_expr(c, arg);
+                    arg = arg->right;
+                    i++;
+                }
+                emit(c, ")");
+            }
+            else if (strcmp(fn, "indexof") == 0 || strcmp(fn, "indice") == 0) {
+                // Index of character
+                emit(c, "indexof(");
+                if (n->left) compile_expr(c, n->left);
+                if (n->left && n->left->right) {
+                    emit(c, ", ");
+                    compile_expr(c, n->left->right);
+                }
+                emit(c, ")");
+            }
+            else if (strcmp(fn, "charat") == 0 || strcmp(fn, "caracter") == 0) {
+                // Character at index
+                emit(c, "charat(");
+                if (n->left) compile_expr(c, n->left);
+                if (n->left && n->left->right) {
+                    emit(c, ", ");
+                    compile_expr(c, n->left->right);
+                }
+                emit(c, ")");
+            }
             else {
                 // User-defined function call
                 emit(c, "%s(", fn);
@@ -497,10 +572,16 @@ static void compile_call(Compiler* c, ASTNode* n) {
                 emit(c, ");\n");
             }
             else if (n->left && n->left->type == FN_CALL_NODE) {
-                // Function call returns a number
-                emit(c, "prt%snum(", ln?"ln":"");
-                compile_expr(c, n->left);
-                emit(c, ");\n");
+                // Function call - check if returns string
+                if (is_string_expr_c(c, n->left)) {
+                    emit(c, "prt%s(", ln?"ln":"");
+                    compile_expr(c, n->left);
+                    emit(c, ");\n");
+                } else {
+                    emit(c, "prt%snum(", ln?"ln":"");
+                    compile_expr(c, n->left);
+                    emit(c, ");\n");
+                }
             }
             else emit(c, "prt%s(\"\");\n", ln?"ln":"");
         }
@@ -509,6 +590,29 @@ static void compile_call(Compiler* c, ASTNode* n) {
         else if (strstr(fn,"cano")) emit(c, "cano();\n");
         else if (strstr(fn,"gaitan")) emit(c, "gaitan();\n");
         else if (strstr(fn,"garcia")) emit(c, "garcia();\n");
+        else if (strcmp(fn,"write_file")==0 || strcmp(fn,"escribir_archivo")==0) {
+            emit(c, "write_file(");
+            if (n->left) compile_expr(c, n->left);
+            if (n->left && n->left->right) {
+                emit(c, ", ");
+                compile_expr(c, n->left->right);
+            }
+            emit(c, ");\n");
+        }
+        else if (strcmp(fn,"append_file")==0 || strcmp(fn,"agregar_archivo")==0) {
+            emit(c, "append_file(");
+            if (n->left) compile_expr(c, n->left);
+            if (n->left && n->left->right) {
+                emit(c, ", ");
+                compile_expr(c, n->left->right);
+            }
+            emit(c, ");\n");
+        }
+        else if (strcmp(fn,"read_file")==0 || strcmp(fn,"leer_archivo")==0) {
+            emit(c, "read_file(");
+            if (n->left) compile_expr(c, n->left);
+            emit(c, ");\n");
+        }
         else {
             // User-defined function call with arguments
             emit(c, "%s(", fn);
