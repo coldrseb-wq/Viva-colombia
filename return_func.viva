@@ -1,0 +1,3 @@
+fn test() {
+    retorno 42;
+}
