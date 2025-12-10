@@ -13,12 +13,20 @@
 #define MAX_STRS 100
 #define MAX_BUF 16384
 #define MAX_LABELS 256
+#define MAX_FUNCS 64
+#define MAX_PARAMS 8
 
 typedef enum { OUT_C, OUT_ASM, OUT_ELF } OutMode;
 
 typedef struct { char name[64]; int is_str; int offset; } Var;
 typedef struct { char val[256]; char lbl[32]; int offset; } Str;
 typedef struct { char name[32]; int offset; } Label;
+typedef struct {
+    char name[64];
+    int param_count;
+    char params[MAX_PARAMS][64];
+    int code_offset;  // offset in machine code for this function
+} UserFunc;
 
 typedef struct {
     FILE* f;
@@ -38,6 +46,12 @@ typedef struct {
     ELFFile* elf;
     int stack_off;
     int data_size;
+    // User-defined functions
+    UserFunc funcs[MAX_FUNCS];
+    int nfunc;
+    int in_function;  // Track if we're compiling inside a function
+    int saved_nvar;   // Saved variable count when entering function
+    int saved_stack;  // Saved stack offset when entering function
 } Compiler;
 
 // Forward declarations
@@ -87,6 +101,31 @@ static int get_var_off(Compiler* c, const char* name) {
 static int is_var_str(Compiler* c, const char* name) {
     int i = find_var(c, name);
     return (i >= 0) ? c->vars[i].is_str : 0;
+}
+
+// === FUNCTION MANAGEMENT ===
+static int find_func(Compiler* c, const char* name) {
+    for (int i = 0; i < c->nfunc; i++)
+        if (strcmp(c->funcs[i].name, name) == 0) return i;
+    return -1;
+}
+
+static int add_func(Compiler* c, const char* name, int param_count) {
+    if (c->nfunc >= MAX_FUNCS) return -1;
+    strncpy(c->funcs[c->nfunc].name, name, 63);
+    c->funcs[c->nfunc].param_count = param_count;
+    c->funcs[c->nfunc].code_offset = c->mc ? c->mc->size : 0;
+    return c->nfunc++;
+}
+
+static void set_func_param(Compiler* c, int func_idx, int param_idx, const char* name) {
+    if (func_idx >= 0 && func_idx < c->nfunc && param_idx < MAX_PARAMS) {
+        strncpy(c->funcs[func_idx].params[param_idx], name, 63);
+    }
+}
+
+static int is_user_func(Compiler* c, const char* name) {
+    return find_func(c, name) >= 0;
 }
 
 // === STRING MANAGEMENT ===
@@ -278,6 +317,13 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             else if (strcmp(n->value, "!=") == 0) emit(c, "    cmp rax,rbx\n    setne al\n    movzx rax,al\n");
             else if (strcmp(n->value, "&&") == 0) emit(c, "    and rax,rbx\n");
             else if (strcmp(n->value, "||") == 0) emit(c, "    or rax,rbx\n");
+            // Bitwise operators
+            else if (strcmp(n->value, "&") == 0) emit(c, "    and rax,rbx\n");
+            else if (strcmp(n->value, "|") == 0) emit(c, "    or rax,rbx\n");
+            else if (strcmp(n->value, "^") == 0) emit(c, "    xor rax,rbx\n");
+            // Shift operators
+            else if (strcmp(n->value, "<<") == 0) emit(c, "    mov rcx,rbx\n    shl rax,cl\n");
+            else if (strcmp(n->value, ">>") == 0) emit(c, "    mov rcx,rbx\n    sar rax,cl\n");
         }
         else if (c->mc) {
             compile_expr(c, n->left);
@@ -291,8 +337,22 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             else if (strcmp(n->value, "-") == 0) encode_sub_rax_rbx(c->mc);
             else if (strcmp(n->value, "*") == 0) encode_mul_rbx(c->mc);
             else if (strcmp(n->value, "/") == 0) encode_div_rbx(c->mc);
+            else if (strcmp(n->value, "%") == 0) encode_mod_rbx(c->mc);
             else if (strcmp(n->value, "&&") == 0) encode_and_rax_rbx(c->mc);
             else if (strcmp(n->value, "||") == 0) encode_or_rax_rbx(c->mc);
+            // Bitwise operators
+            else if (strcmp(n->value, "&") == 0) encode_and_rax_rbx(c->mc);
+            else if (strcmp(n->value, "|") == 0) encode_or_rax_rbx(c->mc);
+            else if (strcmp(n->value, "^") == 0) encode_xor_rax_rbx(c->mc);
+            // Shift operators
+            else if (strcmp(n->value, "<<") == 0) {
+                encode_mov_cl_bl(c->mc);  // move shift count to cl
+                encode_shl_rax_cl(c->mc);
+            }
+            else if (strcmp(n->value, ">>") == 0) {
+                encode_mov_cl_bl(c->mc);  // move shift count to cl
+                encode_sar_rax_cl(c->mc); // arithmetic shift right
+            }
             else if (strcmp(n->value, ">") == 0) {
                 encode_cmp_rax_rbx(c->mc);
                 encode_setg_al(c->mc);
@@ -330,6 +390,7 @@ static void compile_expr(Compiler* c, ASTNode* n) {
         if (c->mode == OUT_C) {
             if (n->value && (strcmp(n->value,"!")==0 || strcmp(n->value,"no")==0)) emit(c, "!");
             else if (n->value && strcmp(n->value,"-")==0) emit(c, "-");
+            else if (n->value && strcmp(n->value,"~")==0) emit(c, "~");
             compile_expr(c, op);
         }
         else if (c->mode == OUT_ASM) {
@@ -338,6 +399,8 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                 emit(c, "    cmp rax,0\n    sete al\n    movzx rax,al\n");
             else if (n->value && strcmp(n->value,"-")==0)
                 emit(c, "    neg rax\n");
+            else if (n->value && strcmp(n->value,"~")==0)
+                emit(c, "    not rax\n");
         }
         else if (c->mc) {
             compile_expr(c, op);
@@ -349,21 +412,44 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             else if (n->value && strcmp(n->value,"-")==0) {
                 encode_neg_rax(c->mc);
             }
+            else if (n->value && strcmp(n->value,"~")==0) {
+                encode_not_rax(c->mc);
+            }
         }
     }
 }
 // === FUNCTION CALL ===
+// Helper to count arguments in a function call
+static int count_args(ASTNode* arg) {
+    // Arguments are stored in n->left, linked by n->right?
+    // Actually in parse, only n->left is used for single arg
+    // For multiple args, we need to check the parsing
+    // Currently, function calls only support single argument
+    return arg ? 1 : 0;
+}
+
 static void compile_call(Compiler* c, ASTNode* n) {
     if (!n || !n->value) return;
     const char* fn = n->value;
-    
+
+    // Check if this is a user-defined function
+    int func_idx = find_func(c, fn);
+
     if (c->mode == OUT_C) {
         indent(c);
-        if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
+        if (func_idx >= 0) {
+            // User-defined function call
+            emit(c, "%s(", fn);
+            if (n->left) {
+                compile_expr(c, n->left);
+            }
+            emit(c, ");\n");
+        }
+        else if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
             int ln = (strcmp(fn,"println")==0);
             if (n->left && n->left->type == NUMBER_NODE)
                 emit(c, "prt%snum(%s);\n", ln?"ln":"", n->left->value);
-            else if (n->left && (n->left->type == STRING_LITERAL_NODE || 
+            else if (n->left && (n->left->type == STRING_LITERAL_NODE ||
                      (n->left->type == IDENTIFIER_NODE && n->left->value[0]=='"')))
                 emit(c, "prt%s(%s);\n", ln?"ln":"", n->left->value);
             else if (n->left && n->left->type == IDENTIFIER_NODE) {
@@ -384,11 +470,24 @@ static void compile_call(Compiler* c, ASTNode* n) {
         else if (strstr(fn,"cano")) emit(c, "cano();\n");
         else if (strstr(fn,"gaitan")) emit(c, "gaitan();\n");
         else if (strstr(fn,"garcia")) emit(c, "garcia();\n");
-        else emit(c, "%s();\n", fn);
+        else {
+            // Unknown function - try calling it anyway
+            emit(c, "%s(", fn);
+            if (n->left) compile_expr(c, n->left);
+            emit(c, ");\n");
+        }
     }
     else if (c->mode == OUT_ASM) {
         emit(c, "    ; call %s\n", fn);
-        if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
+        if (func_idx >= 0) {
+            // User-defined function call
+            if (n->left) {
+                compile_expr(c, n->left);
+                emit(c, "    mov rdi, rax\n");
+            }
+            emit(c, "    call %s\n", fn);
+        }
+        else if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
             if (n->left && n->left->type == NUMBER_NODE) {
                 emit(c, "    mov rdi, fmt_d\n    mov rsi, %s\n", n->left->value);
             } else if (n->left && n->left->type == BINARY_OP_NODE) {
@@ -404,11 +503,56 @@ static void compile_call(Compiler* c, ASTNode* n) {
             emit(c, "    xor rax,rax\n    call printf\n");
         }
         else {
+            // Unknown function
+            if (n->left) {
+                compile_expr(c, n->left);
+                emit(c, "    mov rdi, rax\n");
+            }
             emit(c, "    call %s\n", fn);
         }
     }
     else if (c->mc) {
-        if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
+        if (func_idx >= 0) {
+            // User-defined function call
+            // Evaluate argument and put in rdi
+            if (n->left) {
+                compile_expr(c, n->left);
+                encode_mov_rdi_rax(c->mc);
+            }
+            // Calculate relative offset to function
+            int call_pos = c->mc->size;
+            int func_offset = c->funcs[func_idx].code_offset;
+            int rel_offset = func_offset - (call_pos + 5);  // +5 for call instruction size
+            encode_call_rel32(c->mc, rel_offset);
+        }
+        else if (strcmp(fn,"syscall_exit")==0) {
+            // syscall_exit(code) - Linux exit syscall (60)
+            if (n->left) {
+                compile_expr(c, n->left);
+                encode_mov_rdi_rax(c->mc);
+            } else {
+                encode_xor_rax_rax(c->mc);
+                encode_mov_rdi_rax(c->mc);
+            }
+            encode_mov_rax_imm32(c->mc, 60);  // syscall number for exit
+            encode_syscall(c->mc);
+        }
+        else if (strcmp(fn,"syscall_write")==0) {
+            // syscall_write(fd, buf, len) - Linux write syscall (1)
+            // For now, simplified: write to stdout
+            // Full version needs 3 args
+            if (n->left) {
+                compile_expr(c, n->left);  // Get the string/buffer
+                encode_mov_rsi_rax(c->mc);  // buf -> rsi
+            }
+            encode_mov_rax_imm32(c->mc, 1);   // stdout fd
+            encode_mov_rdi_rax(c->mc);        // fd -> rdi
+            encode_mov_rax_imm32(c->mc, 1);   // len = 1 (simplified)
+            encode_mov_rdx_rax(c->mc);        // len -> rdx
+            encode_mov_rax_imm32(c->mc, 1);   // syscall number for write
+            encode_syscall(c->mc);
+        }
+        else if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
             if (n->left && n->left->type == NUMBER_NODE) {
                 encode_mov_rdi_imm64(c->mc, 0);  // fmt placeholder
                 encode_mov_rax_imm32(c->mc, atoi(n->left->value));
@@ -427,6 +571,11 @@ static void compile_call(Compiler* c, ASTNode* n) {
             add_relocation_entry(c->mc, 1, R_X86_64_PLT32, -4);
             encode_call_rel32(c->mc, 0);
         } else {
+            // External/unknown function
+            if (n->left) {
+                compile_expr(c, n->left);
+                encode_mov_rdi_rax(c->mc);
+            }
             encode_call_external(c->mc);
         }
     }
@@ -681,28 +830,106 @@ static void compile_return(Compiler* c, ASTNode* n) {
 // === FUNCTION DECLARATION ===
 static void compile_func(Compiler* c, ASTNode* n) {
     const char* name = n->value ? n->value : "func";
-    
+
+    // Count parameters and register function
+    int param_count = 0;
+    ASTNode* param = n->left;
+    while (param) {
+        param_count++;
+        param = param->right;
+    }
+
+    // Save compiler state for function scope
+    c->saved_nvar = c->nvar;
+    c->saved_stack = c->stack_off;
+    c->in_function = 1;
+    c->stack_off = 0;  // Reset stack for function
+
+    // Register function
+    int func_idx = add_func(c, name, param_count);
+
     if (c->mode == OUT_C) {
-        emit(c, "int %s() {\n", name);
+        // Generate C function with parameters
+        emit(c, "int %s(", name);
+        param = n->left;
+        int first = 1;
+        while (param) {
+            if (!first) emit(c, ", ");
+            emit(c, "int %s", param->value);
+            first = 0;
+            param = param->right;
+        }
+        emit(c, ") {\n");
         c->indent++;
+
+        // Parameters are already available as C variables
+        param = n->left;
+        int param_idx = 0;
+        while (param) {
+            add_var(c, param->value, 0);  // Track in var table
+            set_func_param(c, func_idx, param_idx++, param->value);
+            param = param->right;
+        }
+
         compile_node(c, n->right);
         c->indent--;
         emit(c, "    return 0;\n}\n\n");
     }
     else if (c->mode == OUT_ASM) {
         emit(c, "%s:\n    push rbp\n    mov rbp,rsp\n    sub rsp,256\n", name);
+
+        // Store parameters on stack (System V AMD64: rdi, rsi, rdx, rcx, r8, r9)
+        param = n->left;
+        int param_idx = 0;
+        const char* param_regs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+        while (param && param_idx < 6) {
+            int off = add_var(c, param->value, 0);
+            off = c->vars[c->nvar - 1].offset;
+            emit(c, "    mov [rbp%+d], %s  ; param %s\n", off, param_regs[param_idx], param->value);
+            set_func_param(c, func_idx, param_idx++, param->value);
+            param = param->right;
+        }
+
         compile_node(c, n->right);
         emit(c, "    xor rax,rax\n    leave\n    ret\n\n");
     }
     else if (c->mc) {
+        // Record function start offset
+        if (func_idx >= 0) c->funcs[func_idx].code_offset = c->mc->size;
+
         encode_push_rbp(c->mc);
         encode_mov_rbp_rsp(c->mc);
         encode_sub_rsp_imm8(c->mc, 128);
+
+        // Store parameters on stack (System V AMD64: rdi, rsi, rdx, rcx)
+        param = n->left;
+        int param_idx = 0;
+        while (param && param_idx < 4) {
+            add_var(c, param->value, 0);
+            int off = c->vars[c->nvar - 1].offset;
+            set_func_param(c, func_idx, param_idx, param->value);
+
+            // Store parameter register to stack
+            switch (param_idx) {
+                case 0: encode_mov_memory_from_rdi(c->mc, off); break;
+                case 1: encode_mov_memory_from_rsi(c->mc, off); break;
+                case 2: encode_mov_memory_from_rdx(c->mc, off); break;
+                case 3: encode_mov_memory_from_rcx(c->mc, off); break;
+            }
+            param_idx++;
+            param = param->right;
+        }
+
         compile_node(c, n->right);
         encode_xor_rax_rax(c->mc);
         encode_leave(c->mc);
         encode_ret(c->mc);
     }
+
+    // Restore compiler state
+    c->nvar = c->saved_nvar;
+    c->stack_off = c->saved_stack;
+    c->in_function = 0;
 }
 
 // === NODE DISPATCHER ===

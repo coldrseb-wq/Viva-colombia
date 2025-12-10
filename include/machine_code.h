@@ -165,10 +165,20 @@ int encode_mov_rbx_rax(MachineCode* mc);
 int encode_mov_rcx_rax(MachineCode* mc);
 int encode_mov_rdi_rax(MachineCode* mc);
 int encode_mov_rsi_rax(MachineCode* mc);
+int encode_mov_rdx_rax(MachineCode* mc);
+int encode_mov_rax_rdi(MachineCode* mc);
+int encode_mov_rax_rsi(MachineCode* mc);
+int encode_mov_rax_rdx(MachineCode* mc);
+int encode_mov_rax_rcx(MachineCode* mc);
 int encode_mov_rax_from_memory(MachineCode* mc, int off);
 int encode_mov_memory_from_rax(MachineCode* mc, int off);
 int encode_mov_rbx_from_memory(MachineCode* mc, int off);
 int encode_mov_memory_from_rbx(MachineCode* mc, int off);
+// Store parameter registers to stack
+int encode_mov_memory_from_rdi(MachineCode* mc, int off);
+int encode_mov_memory_from_rsi(MachineCode* mc, int off);
+int encode_mov_memory_from_rdx(MachineCode* mc, int off);
+int encode_mov_memory_from_rcx(MachineCode* mc, int off);
 
 // === ARITHMETIC ===
 int encode_add_rax_rbx(MachineCode* mc);
@@ -214,11 +224,21 @@ int encode_call_external(MachineCode* mc);
 int encode_ret(MachineCode* mc);
 int encode_leave(MachineCode* mc);
 
-// === LOGICAL ===
+// === LOGICAL/BITWISE ===
 int encode_and_rax_rbx(MachineCode* mc);
 int encode_or_rax_rbx(MachineCode* mc);
+int encode_xor_rax_rbx(MachineCode* mc);
 int encode_xor_rax_rax(MachineCode* mc);
 int encode_xor_rdx_rdx(MachineCode* mc);
+
+// === SHIFT OPERATIONS ===
+int encode_shl_rax_cl(MachineCode* mc);  // shift left by CL
+int encode_shr_rax_cl(MachineCode* mc);  // shift right by CL (unsigned)
+int encode_sar_rax_cl(MachineCode* mc);  // shift right by CL (signed)
+int encode_mov_cl_bl(MachineCode* mc);   // move shift amount
+
+// === MODULO ===
+int encode_mod_rbx(MachineCode* mc);     // rax = rax % rbx (result in rdx)
 
 // === MISC ===
 int encode_nop(MachineCode* mc);

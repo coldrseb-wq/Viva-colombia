@@ -12,11 +12,14 @@ typedef enum {
     MINUS,
     MULTIPLY,
     DIVIDE,
+    MODULO,         // For % operator
     ASSIGN,         // For = in variable assignment
     EQUALITY,       // For == operator
     NOT_EQUAL,      // For != operator
     LESS_THAN,      // For < operator
     GREATER_THAN,   // For > operator
+    LESS_EQUAL,     // For <= operator
+    GREATER_EQUAL,  // For >= operator
     LPAREN,
     RPAREN,
     LBRACE,
@@ -40,6 +43,17 @@ typedef enum {
     NO,             // Spanish for "not" (!)
     LBRACKET,       // Left bracket [
     RBRACKET,       // Right bracket ]
+    // Bitwise operators
+    BIT_AND,        // For & (single)
+    BIT_OR,         // For | (single)
+    BIT_XOR,        // For ^
+    BIT_NOT,        // For ~
+    // Shift operators
+    SHIFT_LEFT,     // For <<
+    SHIFT_RIGHT,    // For >>
+    // Pointer operators
+    AMPERSAND,      // For & (address-of, same token as BIT_AND contextually)
+    ASTERISK,       // For * (dereference, same token as MULTIPLY contextually)
     UNKNOWN
 } TokenType;
 

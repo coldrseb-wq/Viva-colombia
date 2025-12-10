@@ -11,6 +11,7 @@ ASTNode* init_ast_node(NodeType type) {
     node->type = type;
     node->left = NULL;
     node->right = NULL;
+    node->extra = NULL;
     node->value = NULL;
     return node;
 }
@@ -27,10 +28,12 @@ void free_ast_node(ASTNode* node) {
             // to avoid accessing memory after it's freed
             ASTNode* left = node->left;
             ASTNode* right = node->right;
+            ASTNode* extra = node->extra;
 
             // Set to NULL before recursively freeing to avoid issues with circular references
             node->left = NULL;
             node->right = NULL;
+            node->extra = NULL;
 
             // Free the subtrees
             if (left != NULL) {
@@ -38,6 +41,9 @@ void free_ast_node(ASTNode* node) {
             }
             if (right != NULL) {
                 free_ast_node(right);
+            }
+            if (extra != NULL) {
+                free_ast_node(extra);
             }
 
             // Free value if exists
@@ -58,7 +64,11 @@ void free_ast_node(ASTNode* node) {
 // Helper function to check if a token is an operator
 int is_operator(TokenType type) {
     return type == PLUS || type == MINUS || type == MULTIPLY || type == DIVIDE ||
-           type == EQUALITY || type == NOT_EQUAL || type == LESS_THAN || type == GREATER_THAN;
+           type == MODULO || type == EQUALITY || type == NOT_EQUAL ||
+           type == LESS_THAN || type == GREATER_THAN || type == LESS_EQUAL || type == GREATER_EQUAL ||
+           type == BIT_AND || type == BIT_OR || type == BIT_XOR ||
+           type == SHIFT_LEFT || type == SHIFT_RIGHT ||
+           type == Y || type == O;
 }
 
 // Parse the primary part of an expression (numbers, identifiers, function calls, parenthesized expressions)
@@ -70,16 +80,34 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
     Token* current_token = tokens->tokens[*pos];
     ASTNode* node = NULL;
 
-    // Handle unary operators (like "no" for NOT)
+    // Handle unary operators (like "no" for NOT, "~" for bitwise NOT, "-" for negation)
     if (current_token->type == NO) {
         (*pos)++;  // skip 'no' token
-        // Parse the operand for the unary operator
         ASTNode* operand = parse_primary(tokens, pos);
-
         if (operand != NULL) {
             node = init_ast_node(UNARY_OP_NODE);
-            node->value = strdup("no");  // operator
-            node->right = operand;  // operand
+            node->value = strdup("!");  // normalize to !
+            node->right = operand;
+        }
+        return node;
+    }
+    if (current_token->type == BIT_NOT) {
+        (*pos)++;  // skip '~' token
+        ASTNode* operand = parse_primary(tokens, pos);
+        if (operand != NULL) {
+            node = init_ast_node(UNARY_OP_NODE);
+            node->value = strdup("~");
+            node->right = operand;
+        }
+        return node;
+    }
+    if (current_token->type == MINUS) {
+        (*pos)++;  // skip '-' token
+        ASTNode* operand = parse_primary(tokens, pos);
+        if (operand != NULL) {
+            node = init_ast_node(UNARY_OP_NODE);
+            node->value = strdup("-");
+            node->right = operand;
         }
         return node;
     }
@@ -172,34 +200,54 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
     return node;
 }
 
-// Operator precedence levels
+// Operator precedence levels (C-style precedence)
 typedef enum {
     PREC_NONE,
     PREC_ASSIGNMENT,  // =
     PREC_OR,          // or, ||
     PREC_AND,         // and, &&
+    PREC_BIT_OR,      // |
+    PREC_BIT_XOR,     // ^
+    PREC_BIT_AND,     // &
     PREC_EQUALITY,    // ==, !=
     PREC_COMPARISON,  // <, >, <=, >=
+    PREC_SHIFT,       // <<, >>
     PREC_TERM,        // +, -
-    PREC_FACTOR,      // *, /
-    PREC_UNARY,       // !, - (unary)
+    PREC_FACTOR,      // *, /, %
+    PREC_UNARY,       // !, -, ~ (unary)
     PREC_PRIMARY      // numbers, identifiers, grouping
 } Precedence;
 
 Precedence get_precedence(TokenType type) {
     switch (type) {
-        case PLUS:
-        case MINUS:
-            return PREC_TERM;
-        case MULTIPLY:
-        case DIVIDE:
-            return PREC_FACTOR;
+        case O:             // ||
+            return PREC_OR;
+        case Y:             // &&
+            return PREC_AND;
+        case BIT_OR:
+            return PREC_BIT_OR;
+        case BIT_XOR:
+            return PREC_BIT_XOR;
+        case BIT_AND:
+            return PREC_BIT_AND;
         case EQUALITY:
         case NOT_EQUAL:
             return PREC_EQUALITY;
         case LESS_THAN:
         case GREATER_THAN:
+        case LESS_EQUAL:
+        case GREATER_EQUAL:
             return PREC_COMPARISON;
+        case SHIFT_LEFT:
+        case SHIFT_RIGHT:
+            return PREC_SHIFT;
+        case PLUS:
+        case MINUS:
+            return PREC_TERM;
+        case MULTIPLY:
+        case DIVIDE:
+        case MODULO:
+            return PREC_FACTOR;
         default:
             return PREC_NONE;
     }

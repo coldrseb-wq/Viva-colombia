@@ -75,9 +75,6 @@ void print_ast(ASTNode* node, int depth) {
         case CONDITION_NODE:
             printf("CONDITION\n");
             break;
-        case ELSE_NODE:
-            printf("ELSE\n");
-            break;
         default:
             printf("UNKNOWN NODE TYPE: %d\n", node->type);
             break;
@@ -373,13 +370,6 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
                 return interpret_ast(node->left, symbol_table);
             }
             return 0;
-        }
-
-        case ELSE_NODE: {
-            if (node->left) {
-                interpret_ast(node->left, symbol_table);
-            }
-            break;
         }
 
         case STRING_LITERAL_NODE: {

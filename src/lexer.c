@@ -132,7 +132,7 @@ TokenStream* tokenize(const char* source) {
         }
         else {
             // Single character tokens
-            char ch[2] = {*current, '\0'};
+            char ch[3] = {*current, '\0', '\0'};
 
             TokenType type;
             switch (*current) {
@@ -140,9 +140,11 @@ TokenStream* tokenize(const char* source) {
                 case '-': type = MINUS; break;
                 case '*': type = MULTIPLY; break;
                 case '/': type = DIVIDE; break;
+                case '%': type = MODULO; break;
                 case '=':
                     if (*(current + 1) == '=') {
                         current++; // Skip next '='
+                        ch[1] = '=';
                         type = EQUALITY;
                     } else {
                         type = ASSIGN;
@@ -151,29 +153,58 @@ TokenStream* tokenize(const char* source) {
                 case '!':
                     if (*(current + 1) == '=') {
                         current++; // Skip next '='
+                        ch[1] = '=';
                         type = NOT_EQUAL;
                     } else {
-                        type = UNKNOWN;
+                        type = NO; // Unary not
                     }
                     break;
-                case '<': type = LESS_THAN; break;
-                case '>': type = GREATER_THAN; break;
+                case '<':
+                    if (*(current + 1) == '<') {
+                        current++; // Skip next '<'
+                        ch[1] = '<';
+                        type = SHIFT_LEFT;
+                    } else if (*(current + 1) == '=') {
+                        current++; // Skip next '='
+                        ch[1] = '=';
+                        type = LESS_EQUAL;
+                    } else {
+                        type = LESS_THAN;
+                    }
+                    break;
+                case '>':
+                    if (*(current + 1) == '>') {
+                        current++; // Skip next '>'
+                        ch[1] = '>';
+                        type = SHIFT_RIGHT;
+                    } else if (*(current + 1) == '=') {
+                        current++; // Skip next '='
+                        ch[1] = '=';
+                        type = GREATER_EQUAL;
+                    } else {
+                        type = GREATER_THAN;
+                    }
+                    break;
                 case '&':
                     if (*(current + 1) == '&') {
                         current++; // Skip next '&'
-                        type = Y; // Spanish "and"
+                        ch[1] = '&';
+                        type = Y; // Spanish "and" (logical)
                     } else {
-                        type = UNKNOWN;
+                        type = BIT_AND; // Bitwise AND
                     }
                     break;
                 case '|':
                     if (*(current + 1) == '|') {
                         current++; // Skip next '|'
-                        type = O; // Spanish "or"
+                        ch[1] = '|';
+                        type = O; // Spanish "or" (logical)
                     } else {
-                        type = UNKNOWN;
+                        type = BIT_OR; // Bitwise OR
                     }
                     break;
+                case '^': type = BIT_XOR; break;
+                case '~': type = BIT_NOT; break;
                 case '(': type = LPAREN; break;
                 case ')': type = RPAREN; break;
                 case '{': type = LBRACE; break;

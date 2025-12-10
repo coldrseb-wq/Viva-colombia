@@ -171,6 +171,31 @@ int encode_mov_rsi_rax(MachineCode* mc) {
     return append_bytes(mc, c, 3);
 }
 
+int encode_mov_rdx_rax(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x89, 0xC2};  // mov rdx, rax
+    return append_bytes(mc, c, 3);
+}
+
+int encode_mov_rax_rdi(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x89, 0xF8};  // mov rax, rdi
+    return append_bytes(mc, c, 3);
+}
+
+int encode_mov_rax_rsi(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x89, 0xF0};  // mov rax, rsi
+    return append_bytes(mc, c, 3);
+}
+
+int encode_mov_rax_rdx(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x89, 0xD0};  // mov rax, rdx
+    return append_bytes(mc, c, 3);
+}
+
+int encode_mov_rax_rcx(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x89, 0xC8};  // mov rax, rcx
+    return append_bytes(mc, c, 3);
+}
+
 // Memory operations
 int encode_mov_rax_from_memory(MachineCode* mc, int off) {
     uint8_t c[] = {0x48, 0x8B, 0x85};
@@ -192,6 +217,31 @@ int encode_mov_rbx_from_memory(MachineCode* mc, int off) {
 
 int encode_mov_memory_from_rbx(MachineCode* mc, int off) {
     uint8_t c[] = {0x48, 0x89, 0x9D};
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+
+// Store parameter registers to stack (for function parameters)
+int encode_mov_memory_from_rdi(MachineCode* mc, int off) {
+    uint8_t c[] = {0x48, 0x89, 0xBD};  // mov [rbp+off], rdi
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+
+int encode_mov_memory_from_rsi(MachineCode* mc, int off) {
+    uint8_t c[] = {0x48, 0x89, 0xB5};  // mov [rbp+off], rsi
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+
+int encode_mov_memory_from_rdx(MachineCode* mc, int off) {
+    uint8_t c[] = {0x48, 0x89, 0x95};  // mov [rbp+off], rdx
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+
+int encode_mov_memory_from_rcx(MachineCode* mc, int off) {
+    uint8_t c[] = {0x48, 0x89, 0x8D};  // mov [rbp+off], rcx
     if (append_bytes(mc, c, 3)) return -1;
     return append_bytes(mc, (uint8_t*)&off, 4);
 }
@@ -395,24 +445,62 @@ int encode_leave(MachineCode* mc) {
     return append_bytes(mc, c, 1);
 }
 
-// === LOGICAL ===
+// === LOGICAL/BITWISE ===
 int encode_and_rax_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x21, 0xD8};
+    uint8_t c[] = {0x48, 0x21, 0xD8};  // and rax, rbx
     return append_bytes(mc, c, 3);
 }
 
 int encode_or_rax_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x09, 0xD8};
+    uint8_t c[] = {0x48, 0x09, 0xD8};  // or rax, rbx
+    return append_bytes(mc, c, 3);
+}
+
+int encode_xor_rax_rbx(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x31, 0xD8};  // xor rax, rbx
     return append_bytes(mc, c, 3);
 }
 
 int encode_xor_rax_rax(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x31, 0xC0};
+    uint8_t c[] = {0x48, 0x31, 0xC0};  // xor rax, rax (zero rax)
     return append_bytes(mc, c, 3);
 }
 
 int encode_xor_rdx_rdx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x31, 0xD2};
+    uint8_t c[] = {0x48, 0x31, 0xD2};  // xor rdx, rdx (zero rdx)
+    return append_bytes(mc, c, 3);
+}
+
+// === SHIFT OPERATIONS ===
+int encode_shl_rax_cl(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0xD3, 0xE0};  // shl rax, cl
+    return append_bytes(mc, c, 3);
+}
+
+int encode_shr_rax_cl(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0xD3, 0xE8};  // shr rax, cl (unsigned)
+    return append_bytes(mc, c, 3);
+}
+
+int encode_sar_rax_cl(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0xD3, 0xF8};  // sar rax, cl (signed)
+    return append_bytes(mc, c, 3);
+}
+
+int encode_mov_cl_bl(MachineCode* mc) {
+    uint8_t c[] = {0x88, 0xD9};  // mov cl, bl
+    return append_bytes(mc, c, 2);
+}
+
+// === MODULO ===
+int encode_mod_rbx(MachineCode* mc) {
+    // Modulo: rax = rax % rbx
+    // Uses idiv which puts quotient in rax, remainder in rdx
+    uint8_t a[] = {0x48, 0x31, 0xD2};  // xor rdx, rdx (clear for division)
+    uint8_t b[] = {0x48, 0xF7, 0xF3};  // idiv rbx
+    uint8_t c[] = {0x48, 0x89, 0xD0};  // mov rax, rdx (move remainder to rax)
+    if (append_bytes(mc, a, 3)) return -1;
+    if (append_bytes(mc, b, 3)) return -1;
     return append_bytes(mc, c, 3);
 }
 
