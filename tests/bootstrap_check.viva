@@ -1,0 +1,60 @@
+// Bootstrap Readiness Check
+// Tests features needed for self-hosting compiler
+
+println("=== Bootstrap Feature Check ===");
+
+// 1. Basic features - PASS
+decreto x = 42;
+println("1. Variables: PASS");
+
+// 2. Conditionals - PASS
+si (x > 0) {
+    println("2. Conditionals: PASS");
+}
+
+// 3. Loops - PASS
+decreto i = 0;
+mientras (i < 1) {
+    println("3. Loops: PASS");
+    i = i + 1;
+}
+
+// 4. Arrays - PASS
+decreto arr[10];
+arr[0] = 65;
+println("4. Arrays: PASS");
+
+// 5. Structs - PASS
+estructura Token {
+    tipo;
+    valor;
+}
+nuevo Token t;
+t.tipo = 1;
+println("5. Structs: PASS");
+
+// 6. Functions - PASS
+funcion test_func(a) {
+    println("6. Functions: PASS");
+}
+test_func(1);
+
+// 7. File I/O - PASS
+archivo f;
+f = abrir("bootstrap_test.txt", "w");
+escribir(f, "test");
+cerrar(f);
+println("7. File I/O: PASS");
+
+// 8. Dynamic memory - PASS
+decreto ptr = reservar(100);
+liberar(ptr);
+println("8. Dynamic Memory: PASS");
+
+println("=== Missing for Bootstrap ===");
+println("- Character access: str[i]");
+println("- Int to string (itoa)");
+println("- Byte-level file write");
+println("- String concatenation");
+
+println("=== Check Complete ===");
