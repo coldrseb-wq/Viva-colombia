@@ -437,13 +437,52 @@ int encode_syscall(MachineCode* mc) {
 // === LINUX SYSCALL HELPERS ===
 // sys_write(fd=RDI, buf=RSI, count=RDX) - syscall #1
 int encode_sys_write(MachineCode* mc) {
-    encode_mov_rax_imm32(mc, 1);  // syscall number for write
+    encode_mov_rax_imm32(mc, SYSCALL_LINUX_WRITE);
     return encode_syscall(mc);
 }
 
 // sys_exit(status=RDI) - syscall #60
 int encode_sys_exit(MachineCode* mc) {
-    encode_mov_rax_imm32(mc, 60);  // syscall number for exit
+    encode_mov_rax_imm32(mc, SYSCALL_LINUX_EXIT);
+    return encode_syscall(mc);
+}
+
+// === PLATFORM-SPECIFIC SYSCALL HELPERS ===
+int encode_sys_write_platform(MachineCode* mc, StandalonePlatform plat) {
+    switch (plat) {
+        case STANDALONE_LINUX:
+            encode_mov_rax_imm32(mc, SYSCALL_LINUX_WRITE);
+            break;
+        case STANDALONE_FREEBSD:
+            encode_mov_rax_imm32(mc, SYSCALL_FREEBSD_WRITE);
+            break;
+        case STANDALONE_MACOS:
+            encode_mov_rax_imm64(mc, SYSCALL_MACOS_WRITE);
+            break;
+        case STANDALONE_WINDOWS:
+            // Windows doesn't use syscalls - uses kernel32.dll imports
+            // This function shouldn't be called for Windows
+            return -1;
+    }
+    return encode_syscall(mc);
+}
+
+int encode_sys_exit_platform(MachineCode* mc, StandalonePlatform plat) {
+    switch (plat) {
+        case STANDALONE_LINUX:
+            encode_mov_rax_imm32(mc, SYSCALL_LINUX_EXIT);
+            break;
+        case STANDALONE_FREEBSD:
+            encode_mov_rax_imm32(mc, SYSCALL_FREEBSD_EXIT);
+            break;
+        case STANDALONE_MACOS:
+            encode_mov_rax_imm64(mc, SYSCALL_MACOS_EXIT);
+            break;
+        case STANDALONE_WINDOWS:
+            // Windows doesn't use syscalls - uses kernel32.dll imports
+            // This function shouldn't be called for Windows
+            return -1;
+    }
     return encode_syscall(mc);
 }
 
@@ -460,7 +499,7 @@ int encode_print_string_setup(MachineCode* mc, int32_t str_offset) {
 int encode_exit_with_code(MachineCode* mc, int code) {
     encode_mov_rax_imm32(mc, code);
     encode_mov_rdi_rax(mc);
-    encode_mov_rax_imm32(mc, 60);
+    encode_mov_rax_imm32(mc, SYSCALL_LINUX_EXIT);
     return encode_syscall(mc);
 }
 
@@ -832,4 +871,108 @@ int write_standalone_elf_executable(const char* filename, MachineCode* code,
     #endif
 
     return 0;
+}
+
+// === FREEBSD ELF STANDALONE EXECUTABLE ===
+// FreeBSD uses ELF with OS/ABI byte = 9 (ELFOSABI_FREEBSD)
+#define ELFOSABI_FREEBSD 9
+
+int write_standalone_freebsd_executable(const char* filename, MachineCode* code,
+                                        uint8_t* data, size_t data_size) {
+    if (!filename || !code) return -1;
+
+    FILE* f = fopen(filename, "wb");
+    if (!f) return -1;
+
+    size_t ehdr_size = sizeof(Elf64_Ehdr);
+    size_t phdr_size = sizeof(Elf64_Phdr);
+    size_t headers_size = ehdr_size + phdr_size;
+
+    size_t code_offset = headers_size;
+    size_t data_offset = code_offset + code->size;
+    size_t total_size = data_offset + (data ? data_size : 0);
+
+    size_t code_vaddr = VADDR_BASE + code_offset;
+    size_t data_vaddr = VADDR_BASE + data_offset;
+
+    // Build ELF header - same as Linux but with FreeBSD OS/ABI
+    Elf64_Ehdr ehdr = {0};
+    ehdr.e_ident[0] = 0x7f;
+    ehdr.e_ident[1] = 'E';
+    ehdr.e_ident[2] = 'L';
+    ehdr.e_ident[3] = 'F';
+    ehdr.e_ident[4] = ELFCLASS64;
+    ehdr.e_ident[5] = ELFDATA2LSB;
+    ehdr.e_ident[6] = EV_CURRENT;
+    ehdr.e_ident[7] = ELFOSABI_FREEBSD;  // FreeBSD OS/ABI
+    ehdr.e_type = ET_EXEC;
+    ehdr.e_machine = EM_X86_64;
+    ehdr.e_version = EV_CURRENT;
+    ehdr.e_entry = code_vaddr;
+    ehdr.e_phoff = ehdr_size;
+    ehdr.e_shoff = 0;
+    ehdr.e_flags = 0;
+    ehdr.e_ehsize = ehdr_size;
+    ehdr.e_phentsize = phdr_size;
+    ehdr.e_phnum = 1;
+    ehdr.e_shentsize = 0;
+    ehdr.e_shnum = 0;
+    ehdr.e_shstrndx = 0;
+
+    Elf64_Phdr phdr = {0};
+    phdr.p_type = PT_LOAD;
+    phdr.p_flags = PF_R | PF_W | PF_X;
+    phdr.p_offset = 0;
+    phdr.p_vaddr = VADDR_BASE;
+    phdr.p_paddr = VADDR_BASE;
+    phdr.p_filesz = total_size;
+    phdr.p_memsz = total_size;
+    phdr.p_align = 0x1000;
+
+    // Apply data relocations
+    for (size_t i = 0; i < code->data_reloc_count; i++) {
+        DataReloc* dr = &code->data_relocs[i];
+        size_t rip_after = code_vaddr + dr->code_offset + 4;
+        size_t target = data_vaddr + dr->data_offset;
+        int32_t offset = (int32_t)(target - rip_after);
+        memcpy(code->code + dr->code_offset, &offset, 4);
+    }
+
+    fwrite(&ehdr, ehdr_size, 1, f);
+    fwrite(&phdr, phdr_size, 1, f);
+    fwrite(code->code, code->size, 1, f);
+    if (data && data_size > 0) {
+        fwrite(data, data_size, 1, f);
+    }
+
+    fclose(f);
+
+    #ifndef _WIN32
+    chmod(filename, 0755);
+    #endif
+
+    return 0;
+}
+
+// === PLATFORM-AWARE STANDALONE WRITER ===
+// Dispatches to the correct writer based on platform
+int write_standalone_executable_platform(const char* filename, MachineCode* code,
+                                         uint8_t* data, size_t data_size,
+                                         StandalonePlatform platform) {
+    // Forward declarations for other platform writers
+    extern int write_standalone_macho_executable(const char*, MachineCode*, uint8_t*, size_t);
+    extern int write_standalone_pe_executable(const char*, MachineCode*, uint8_t*, size_t);
+
+    switch (platform) {
+        case STANDALONE_LINUX:
+            return write_standalone_elf_executable(filename, code, data, data_size);
+        case STANDALONE_FREEBSD:
+            return write_standalone_freebsd_executable(filename, code, data, data_size);
+        case STANDALONE_MACOS:
+            return write_standalone_macho_executable(filename, code, data, data_size);
+        case STANDALONE_WINDOWS:
+            return write_standalone_pe_executable(filename, code, data, data_size);
+        default:
+            return -1;
+    }
 }

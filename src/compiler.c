@@ -8,6 +8,8 @@
 #include "../include/parser.h"
 #include "../include/compiler.h"
 #include "../include/machine_code.h"
+#include "../include/macho.h"
+#include "../include/pe_coff.h"
 
 #define MAX_VARS 100
 #define MAX_STRS 100
@@ -219,7 +221,22 @@ static void finish_compiler(Compiler* c) {
         }
         fclose(c->f);
         c->f = NULL;
-        write_standalone_elf_executable(c->outname, c->mc, data, data_size);
+
+        // Use platform-aware standalone writer
+        switch (c->plat) {
+            case PLATFORM_LINUX:
+                write_standalone_elf_executable(c->outname, c->mc, data, data_size);
+                break;
+            case PLATFORM_FREEBSD:
+                write_standalone_freebsd_executable(c->outname, c->mc, data, data_size);
+                break;
+            case PLATFORM_MACOS:
+                write_standalone_macho_executable(c->outname, c->mc, data, data_size);
+                break;
+            case PLATFORM_WINDOWS:
+                write_standalone_pe_executable(c->outname, c->mc, data, data_size);
+                break;
+        }
         if (data) free(data);
     }
 
@@ -920,6 +937,19 @@ int compile_viva_to_standalone(const char* code, const char* outfile) {
     Compiler* c = init_compiler(outfile, OUT_STANDALONE);
     if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
     c->plat = PLATFORM_LINUX;
+    if (ast) compile_main(c, ast);
+    finish_compiler(c);
+    free_token_stream(t);
+    free_ast_node(ast);
+    return 0;
+}
+
+int compile_viva_to_standalone_platform(const char* code, const char* outfile, PlatformTarget platform) {
+    TokenStream* t = tokenize(code);
+    ASTNode* ast = parse_program(t);
+    Compiler* c = init_compiler(outfile, OUT_STANDALONE);
+    if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
+    c->plat = platform;
     if (ast) compile_main(c, ast);
     finish_compiler(c);
     free_token_stream(t);

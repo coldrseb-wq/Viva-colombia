@@ -112,4 +112,78 @@ int pecoff_add_symbol(PECOFFFile* p, const char* name, uint32_t value, int16_t s
 int write_pecoff_file(PECOFFFile* p, const char* filename);
 int compile_to_pecoff(MachineCode* mc, const char* filename);
 
+// === PE EXECUTABLE STRUCTURES (full EXE, not just COFF .obj) ===
+
+// DOS Header (64 bytes)
+typedef struct {
+    uint16_t e_magic;      // "MZ"
+    uint16_t e_cblp;
+    uint16_t e_cp;
+    uint16_t e_crlc;
+    uint16_t e_cparhdr;
+    uint16_t e_minalloc;
+    uint16_t e_maxalloc;
+    uint16_t e_ss;
+    uint16_t e_sp;
+    uint16_t e_csum;
+    uint16_t e_ip;
+    uint16_t e_cs;
+    uint16_t e_lfarlc;
+    uint16_t e_ovno;
+    uint16_t e_res[4];
+    uint16_t e_oemid;
+    uint16_t e_oeminfo;
+    uint16_t e_res2[10];
+    uint32_t e_lfanew;     // Offset to PE header
+} DOSHeader;
+
+// PE Optional Header (64-bit)
+typedef struct {
+    uint16_t Magic;                  // 0x20b for PE32+
+    uint8_t  MajorLinkerVersion;
+    uint8_t  MinorLinkerVersion;
+    uint32_t SizeOfCode;
+    uint32_t SizeOfInitializedData;
+    uint32_t SizeOfUninitializedData;
+    uint32_t AddressOfEntryPoint;
+    uint32_t BaseOfCode;
+    uint64_t ImageBase;
+    uint32_t SectionAlignment;
+    uint32_t FileAlignment;
+    uint16_t MajorOperatingSystemVersion;
+    uint16_t MinorOperatingSystemVersion;
+    uint16_t MajorImageVersion;
+    uint16_t MinorImageVersion;
+    uint16_t MajorSubsystemVersion;
+    uint16_t MinorSubsystemVersion;
+    uint32_t Win32VersionValue;
+    uint32_t SizeOfImage;
+    uint32_t SizeOfHeaders;
+    uint32_t CheckSum;
+    uint16_t Subsystem;
+    uint16_t DllCharacteristics;
+    uint64_t SizeOfStackReserve;
+    uint64_t SizeOfStackCommit;
+    uint64_t SizeOfHeapReserve;
+    uint64_t SizeOfHeapCommit;
+    uint32_t LoaderFlags;
+    uint32_t NumberOfRvaAndSizes;
+} PE64OptionalHeader;
+
+// Data Directory
+typedef struct {
+    uint32_t VirtualAddress;
+    uint32_t Size;
+} DataDirectory;
+
+#define IMAGE_NUMBEROF_DIRECTORY_ENTRIES 16
+#define IMAGE_DIRECTORY_ENTRY_IMPORT     1
+
+// PE subsystem values
+#define IMAGE_SUBSYSTEM_WINDOWS_CUI      3   // Console application
+
+// === STANDALONE PE EXECUTABLE (no libc needed, uses kernel32.dll) ===
+int write_standalone_pe_executable(const char* filename, MachineCode* code,
+                                   uint8_t* data, size_t data_size);
+
 #endif

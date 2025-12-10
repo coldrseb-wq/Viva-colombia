@@ -259,9 +259,32 @@ int encode_lea_rax_rip_rel(MachineCode* mc, int32_t off);
 int encode_lea_rdi_rip_rel(MachineCode* mc, int32_t off);
 int encode_lea_rsi_rip_rel(MachineCode* mc, int32_t off);
 
-// === LINUX SYSCALL HELPERS (C-free I/O) ===
+// === SYSCALL NUMBERS BY PLATFORM ===
+// Linux x86_64
+#define SYSCALL_LINUX_WRITE  1
+#define SYSCALL_LINUX_EXIT   60
+
+// FreeBSD x86_64
+#define SYSCALL_FREEBSD_WRITE  4
+#define SYSCALL_FREEBSD_EXIT   1
+
+// macOS x86_64 (Unix syscalls + 0x2000000)
+#define SYSCALL_MACOS_WRITE  0x2000004
+#define SYSCALL_MACOS_EXIT   0x2000001
+
+// Platform enum for standalone executables
+typedef enum {
+    STANDALONE_LINUX,
+    STANDALONE_FREEBSD,
+    STANDALONE_MACOS,
+    STANDALONE_WINDOWS
+} StandalonePlatform;
+
+// === SYSCALL HELPERS (C-free I/O) ===
 int encode_sys_write(MachineCode* mc);
 int encode_sys_exit(MachineCode* mc);
+int encode_sys_write_platform(MachineCode* mc, StandalonePlatform plat);
+int encode_sys_exit_platform(MachineCode* mc, StandalonePlatform plat);
 int encode_print_string_setup(MachineCode* mc, int32_t str_offset);
 int encode_exit_with_code(MachineCode* mc, int code);
 
@@ -285,5 +308,15 @@ int write_complete_elf_file(ELFFile* elf, const char* filename);
 // === STANDALONE ELF EXECUTABLE (no libc needed) ===
 int write_standalone_elf_executable(const char* filename, MachineCode* code,
                                     uint8_t* data, size_t data_size);
+
+// === CROSS-PLATFORM STANDALONE EXECUTABLES ===
+// FreeBSD uses ELF with different OS/ABI byte
+int write_standalone_freebsd_executable(const char* filename, MachineCode* code,
+                                        uint8_t* data, size_t data_size);
+
+// Generic platform-aware standalone writer
+int write_standalone_executable_platform(const char* filename, MachineCode* code,
+                                         uint8_t* data, size_t data_size,
+                                         StandalonePlatform platform);
 
 #endif

@@ -6,6 +6,7 @@
 // Platform target enum (for cross-compilation)
 typedef enum {
     PLATFORM_LINUX,
+    PLATFORM_FREEBSD,
     PLATFORM_MACOS,
     PLATFORM_WINDOWS
 } PlatformTarget;
@@ -24,5 +25,8 @@ int compile_viva_to_platform(const char* viva_code, const char* output_file, Pla
 
 // Function to compile Viva source code to standalone executable (no libc!)
 int compile_viva_to_standalone(const char* viva_code, const char* output_file);
+
+// Function to compile Viva source code to platform-specific standalone executable
+int compile_viva_to_standalone_platform(const char* viva_code, const char* output_file, PlatformTarget platform);
 
 #endif

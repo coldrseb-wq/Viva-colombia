@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include "../include/macho.h"
 
 MachOFile* init_macho_file() {
@@ -213,14 +214,235 @@ int write_macho_file(MachOFile* m, const char* filename) {
 
 int compile_to_macho(MachineCode* mc, const char* filename) {
     if (!mc || !filename) return -1;
-    
+
     MachOFile* m = init_macho_file();
     if (!m) return -1;
-    
+
     macho_set_code(m, mc->code, mc->size);
-    
+
     int result = write_macho_file(m, filename);
     free_macho_file(m);
-    
+
     return result;
+}
+
+// === STANDALONE MACHO EXECUTABLE (no libc needed) ===
+// Uses LC_UNIXTHREAD to set entry point directly - no dyld needed
+
+#define LC_UNIXTHREAD   0x5
+#define x86_THREAD_STATE64      4
+#define x86_THREAD_STATE64_COUNT 42
+
+// Thread state for x86_64 (only need RIP for entry)
+typedef struct {
+    uint64_t rax, rbx, rcx, rdx;
+    uint64_t rdi, rsi, rbp, rsp;
+    uint64_t r8, r9, r10, r11;
+    uint64_t r12, r13, r14, r15;
+    uint64_t rip, rflags;
+    uint64_t cs, fs, gs;
+} x86_thread_state64_t;
+
+typedef struct {
+    uint32_t cmd;
+    uint32_t cmdsize;
+    uint32_t flavor;
+    uint32_t count;
+    x86_thread_state64_t state;
+} UnixThreadCommand;
+
+int write_standalone_macho_executable(const char* filename, MachineCode* code,
+                                      uint8_t* data, size_t data_size) {
+    if (!filename || !code) return -1;
+
+    FILE* f = fopen(filename, "wb");
+    if (!f) return -1;
+
+    // macOS x86_64 executable layout:
+    // [Mach-O Header]
+    // [LC_SEGMENT_64 __PAGEZERO]
+    // [LC_SEGMENT_64 __TEXT with __text section]
+    // [LC_SEGMENT_64 __DATA with __data section] (if data exists)
+    // [LC_UNIXTHREAD]
+    // [padding to page boundary]
+    // [__text section data]
+    // [__data section data]
+
+    uint64_t page_size = 0x1000;
+    uint64_t vm_base = 0x100000000;  // Standard macOS 64-bit base address
+
+    // Calculate header sizes
+    uint32_t header_size = sizeof(MachHeader64);
+
+    // __PAGEZERO segment (no sections)
+    uint32_t pagezero_cmd_size = sizeof(SegmentCommand64);
+
+    // __TEXT segment + 1 section
+    uint32_t text_cmd_size = sizeof(SegmentCommand64) + sizeof(Section64);
+
+    // __DATA segment + 1 section (only if we have data)
+    uint32_t data_cmd_size = (data && data_size > 0) ?
+                             sizeof(SegmentCommand64) + sizeof(Section64) : 0;
+
+    // LC_UNIXTHREAD
+    uint32_t thread_cmd_size = sizeof(UnixThreadCommand);
+
+    uint32_t ncmds = 3;  // PAGEZERO + TEXT + UNIXTHREAD
+    if (data && data_size > 0) ncmds++;  // + DATA
+
+    uint32_t total_cmd_size = pagezero_cmd_size + text_cmd_size + data_cmd_size + thread_cmd_size;
+    uint32_t header_total = header_size + total_cmd_size;
+
+    // Align code start to page boundary
+    uint64_t code_file_offset = (header_total + page_size - 1) & ~(page_size - 1);
+    uint64_t code_vm_addr = vm_base + code_file_offset;
+
+    // Data follows code
+    uint64_t data_file_offset = code_file_offset + code->size;
+    data_file_offset = (data_file_offset + 15) & ~15;  // 16-byte align
+    uint64_t data_vm_addr = vm_base + data_file_offset;
+
+    // Total file size and segment size
+    (void)(data_file_offset + (data ? data_size : 0));  // total_file_size - calculated but not needed
+    uint64_t text_segment_size = (data_file_offset - code_file_offset + page_size - 1) & ~(page_size - 1);
+
+    // Apply data relocations (RIP-relative addressing)
+    for (size_t i = 0; i < code->data_reloc_count; i++) {
+        DataReloc* dr = &code->data_relocs[i];
+        uint64_t rip_after = code_vm_addr + dr->code_offset + 4;
+        uint64_t target = data_vm_addr + dr->data_offset;
+        int32_t offset = (int32_t)(target - rip_after);
+        memcpy(code->code + dr->code_offset, &offset, 4);
+    }
+
+    // Build Mach-O header
+    MachHeader64 mh = {0};
+    mh.magic = MH_MAGIC_64;
+    mh.cputype = CPU_TYPE_X86_64;
+    mh.cpusubtype = CPU_SUBTYPE_X86_64;
+    mh.filetype = MH_EXECUTE;
+    mh.ncmds = ncmds;
+    mh.sizeofcmds = total_cmd_size;
+    mh.flags = 0;
+    mh.reserved = 0;
+
+    // __PAGEZERO segment (null pointer trap)
+    SegmentCommand64 pagezero = {0};
+    pagezero.cmd = LC_SEGMENT_64;
+    pagezero.cmdsize = pagezero_cmd_size;
+    strncpy(pagezero.segname, "__PAGEZERO", 16);
+    pagezero.vmaddr = 0;
+    pagezero.vmsize = vm_base;  // All memory below base is __PAGEZERO
+    pagezero.fileoff = 0;
+    pagezero.filesize = 0;
+    pagezero.maxprot = 0;
+    pagezero.initprot = 0;
+    pagezero.nsects = 0;
+    pagezero.flags = 0;
+
+    // __TEXT segment
+    SegmentCommand64 text_seg = {0};
+    text_seg.cmd = LC_SEGMENT_64;
+    text_seg.cmdsize = text_cmd_size;
+    strncpy(text_seg.segname, "__TEXT", 16);
+    text_seg.vmaddr = vm_base;
+    text_seg.vmsize = code_file_offset + text_segment_size;
+    text_seg.fileoff = 0;
+    text_seg.filesize = code_file_offset + code->size;
+    text_seg.maxprot = 7;   // rwx
+    text_seg.initprot = 5;  // r-x
+    text_seg.nsects = 1;
+    text_seg.flags = 0;
+
+    // __text section
+    Section64 text_sect = {0};
+    strncpy(text_sect.sectname, "__text", 16);
+    strncpy(text_sect.segname, "__TEXT", 16);
+    text_sect.addr = code_vm_addr;
+    text_sect.size = code->size;
+    text_sect.offset = code_file_offset;
+    text_sect.align = 4;  // 2^4 = 16 byte alignment
+    text_sect.reloff = 0;
+    text_sect.nreloc = 0;
+    text_sect.flags = S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS;
+
+    // __DATA segment (if needed)
+    SegmentCommand64 data_seg = {0};
+    Section64 data_sect = {0};
+    if (data && data_size > 0) {
+        data_seg.cmd = LC_SEGMENT_64;
+        data_seg.cmdsize = data_cmd_size;
+        strncpy(data_seg.segname, "__DATA", 16);
+        data_seg.vmaddr = data_vm_addr;
+        data_seg.vmsize = (data_size + page_size - 1) & ~(page_size - 1);
+        data_seg.fileoff = data_file_offset;
+        data_seg.filesize = data_size;
+        data_seg.maxprot = 7;   // rwx
+        data_seg.initprot = 3;  // rw-
+        data_seg.nsects = 1;
+        data_seg.flags = 0;
+
+        strncpy(data_sect.sectname, "__data", 16);
+        strncpy(data_sect.segname, "__DATA", 16);
+        data_sect.addr = data_vm_addr;
+        data_sect.size = data_size;
+        data_sect.offset = data_file_offset;
+        data_sect.align = 3;  // 2^3 = 8 byte alignment
+        data_sect.reloff = 0;
+        data_sect.nreloc = 0;
+        data_sect.flags = S_REGULAR;
+    }
+
+    // LC_UNIXTHREAD - sets initial thread state (entry point in RIP)
+    UnixThreadCommand thread = {0};
+    thread.cmd = LC_UNIXTHREAD;
+    thread.cmdsize = thread_cmd_size;
+    thread.flavor = x86_THREAD_STATE64;
+    thread.count = x86_THREAD_STATE64_COUNT;
+    memset(&thread.state, 0, sizeof(thread.state));
+    thread.state.rip = code_vm_addr;  // Entry point
+
+    // Write header
+    fwrite(&mh, sizeof(mh), 1, f);
+
+    // Write load commands
+    fwrite(&pagezero, sizeof(pagezero), 1, f);
+    fwrite(&text_seg, sizeof(text_seg), 1, f);
+    fwrite(&text_sect, sizeof(text_sect), 1, f);
+
+    if (data && data_size > 0) {
+        fwrite(&data_seg, sizeof(data_seg), 1, f);
+        fwrite(&data_sect, sizeof(data_sect), 1, f);
+    }
+
+    fwrite(&thread, sizeof(thread), 1, f);
+
+    // Pad to code offset
+    long current = ftell(f);
+    while (current < (long)code_file_offset) {
+        fputc(0, f);
+        current++;
+    }
+
+    // Write code
+    fwrite(code->code, code->size, 1, f);
+
+    // Pad to data offset
+    if (data && data_size > 0) {
+        current = ftell(f);
+        while (current < (long)data_file_offset) {
+            fputc(0, f);
+            current++;
+        }
+        fwrite(data, data_size, 1, f);
+    }
+
+    fclose(f);
+
+    // Make executable (chmod +x)
+    #ifndef _WIN32
+    chmod(filename, 0755);
+    #endif
+
+    return 0;
 }

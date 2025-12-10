@@ -108,4 +108,8 @@ void macho_set_data(MachOFile* m, uint8_t* data, size_t size);
 int write_macho_file(MachOFile* m, const char* filename);
 int compile_to_macho(MachineCode* mc, const char* filename);
 
+// === STANDALONE MACHO EXECUTABLE (no libc needed) ===
+int write_standalone_macho_executable(const char* filename, MachineCode* code,
+                                      uint8_t* data, size_t data_size);
+
 #endif
