@@ -15,6 +15,7 @@ typedef enum {
     FN_CALL_NODE,
     IF_NODE,
     WHILE_NODE,
+    FOR_NODE,               // For "for" loops
     ASSIGN_NODE,
     VAR_DECL_SPANISH_NODE,  // For "decreto" variable declarations
     FN_DECL_SPANISH_NODE,   // For "cancion" function declarations
@@ -27,7 +28,8 @@ typedef enum {
     ARRAY_ACCESS_NODE,      // For array access operations (arr[index])
     ARRAY_DECL_NODE,        // For array declarations and assignments
     UNARY_OP_NODE,          // For unary operations like ! (not)
-    CONDITION_NODE          // For condition expressions
+    CONDITION_NODE,         // For condition expressions
+    ELSE_NODE               // For else clauses
 } NodeType;
 
 typedef struct ASTNode {
@@ -35,6 +37,7 @@ typedef struct ASTNode {
     char* value;
     struct ASTNode* left;   // Left child
     struct ASTNode* right;  // Right child or next statement
+    struct ASTNode* extra;  // Extra child (for else clauses, for loop components)
 } ASTNode;
 
 ASTNode* init_ast_node(NodeType type);

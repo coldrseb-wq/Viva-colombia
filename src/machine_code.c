@@ -1,4 +1,5 @@
 // src/machine_code.c - EXPANDED for Phase 4
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

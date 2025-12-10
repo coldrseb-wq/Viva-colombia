@@ -8,6 +8,8 @@
 #include "../include/parser.h"
 #include "../include/compiler.h"
 #include "../include/machine_code.h"
+#include "../include/macho.h"
+#include "../include/pe_coff.h"
 
 #define MAX_VARS 100
 #define MAX_STRS 100
@@ -183,22 +185,41 @@ static void write_elf_data_section(Compiler* c) {
 
 static void finish_compiler(Compiler* c) {
     if (!c) return;
-    
+
     if (c->mode == OUT_ASM) {
         write_asm_strings(c);
         if (c->bufpos > 0)
             fwrite(c->buf, 1, c->bufpos, c->f);
     }
-    
-    if (c->mode == OUT_ELF && c->elf && c->mc) {
-        write_elf_data_section(c);
-        create_text_section(c->elf, c->mc);
-        create_symbol_table(c->elf);
-        fclose(c->f);
-        c->f = NULL;
-        write_complete_elf_file(c->elf, c->outname);
+
+    if (c->mode == OUT_ELF && c->mc) {
+        // Close the file first - platform writers will create their own
+        if (c->f) {
+            fclose(c->f);
+            c->f = NULL;
+        }
+
+        // Use platform-specific object file writer
+        switch (c->plat) {
+            case PLATFORM_MACOS:
+                compile_to_macho(c->mc, c->outname);
+                break;
+            case PLATFORM_WINDOWS:
+                compile_to_pecoff(c->mc, c->outname);
+                break;
+            case PLATFORM_LINUX:
+            default:
+                // Use ELF for Linux
+                if (c->elf) {
+                    write_elf_data_section(c);
+                    create_text_section(c->elf, c->mc);
+                    create_symbol_table(c->elf);
+                    write_complete_elf_file(c->elf, c->outname);
+                }
+                break;
+        }
     }
-    
+
     if (c->f) fclose(c->f);
     if (c->mc) free_machine_code(c->mc);
     if (c->elf) free_elf_file(c->elf);

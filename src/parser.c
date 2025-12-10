@@ -11,6 +11,7 @@ ASTNode* init_ast_node(NodeType type) {
     node->type = type;
     node->left = NULL;
     node->right = NULL;
+    node->extra = NULL;
     node->value = NULL;
     return node;
 }
@@ -27,10 +28,12 @@ void free_ast_node(ASTNode* node) {
             // to avoid accessing memory after it's freed
             ASTNode* left = node->left;
             ASTNode* right = node->right;
+            ASTNode* extra = node->extra;
 
             // Set to NULL before recursively freeing to avoid issues with circular references
             node->left = NULL;
             node->right = NULL;
+            node->extra = NULL;
 
             // Free the subtrees
             if (left != NULL) {
@@ -38,6 +41,9 @@ void free_ast_node(ASTNode* node) {
             }
             if (right != NULL) {
                 free_ast_node(right);
+            }
+            if (extra != NULL) {
+                free_ast_node(extra);
             }
 
             // Free value if exists
