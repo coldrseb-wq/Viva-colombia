@@ -66,3 +66,5 @@ stdlib_test_exe
 test_output.txt
 stdlib_test.c
 file_test.c
+phase7_test
+phase7_test.c
