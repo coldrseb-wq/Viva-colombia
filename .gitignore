@@ -58,3 +58,6 @@ backup_*
 *_fixed.c
 *_fixed.s
 *_simplified.c
+# Generated test files
+func_test.c
+func_test_exe
