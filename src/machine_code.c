@@ -1,4 +1,4 @@
-// src/machine_code.c - EXPANDED for Phase 4
+// src/machine_code.c - Complete x86-64 encoding for Viva bootstrap compiler
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,414 +37,380 @@ int append_bytes(MachineCode* mc, const uint8_t* b, size_t len) {
 }
 
 // === STACK OPERATIONS ===
-int encode_push_rbp(MachineCode* mc) {
-    uint8_t c[] = {0x55};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_pop_rbp(MachineCode* mc) {
-    uint8_t c[] = {0x5D};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_push_rax(MachineCode* mc) {
-    uint8_t c[] = {0x50};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_pop_rax(MachineCode* mc) {
-    uint8_t c[] = {0x58};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_push_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x53};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_pop_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x5B};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_push_rcx(MachineCode* mc) {
-    uint8_t c[] = {0x51};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_pop_rcx(MachineCode* mc) {
-    uint8_t c[] = {0x59};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_push_rdx(MachineCode* mc) {
-    uint8_t c[] = {0x52};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_pop_rdx(MachineCode* mc) {
-    uint8_t c[] = {0x5A};
-    return append_bytes(mc, c, 1);
-}
+int encode_push_rbp(MachineCode* mc) { uint8_t c[] = {0x55}; return append_bytes(mc, c, 1); }
+int encode_pop_rbp(MachineCode* mc) { uint8_t c[] = {0x5D}; return append_bytes(mc, c, 1); }
+int encode_push_rax(MachineCode* mc) { uint8_t c[] = {0x50}; return append_bytes(mc, c, 1); }
+int encode_pop_rax(MachineCode* mc) { uint8_t c[] = {0x58}; return append_bytes(mc, c, 1); }
+int encode_push_rbx(MachineCode* mc) { uint8_t c[] = {0x53}; return append_bytes(mc, c, 1); }
+int encode_pop_rbx(MachineCode* mc) { uint8_t c[] = {0x5B}; return append_bytes(mc, c, 1); }
+int encode_push_rcx(MachineCode* mc) { uint8_t c[] = {0x51}; return append_bytes(mc, c, 1); }
+int encode_pop_rcx(MachineCode* mc) { uint8_t c[] = {0x59}; return append_bytes(mc, c, 1); }
+int encode_push_rdx(MachineCode* mc) { uint8_t c[] = {0x52}; return append_bytes(mc, c, 1); }
+int encode_pop_rdx(MachineCode* mc) { uint8_t c[] = {0x5A}; return append_bytes(mc, c, 1); }
+int encode_push_rdi(MachineCode* mc) { uint8_t c[] = {0x57}; return append_bytes(mc, c, 1); }
+int encode_pop_rdi(MachineCode* mc) { uint8_t c[] = {0x5F}; return append_bytes(mc, c, 1); }
+int encode_push_rsi(MachineCode* mc) { uint8_t c[] = {0x56}; return append_bytes(mc, c, 1); }
+int encode_pop_rsi(MachineCode* mc) { uint8_t c[] = {0x5E}; return append_bytes(mc, c, 1); }
+// Extended registers R8-R10 (REX prefix required)
+int encode_push_r8(MachineCode* mc) { uint8_t c[] = {0x41, 0x50}; return append_bytes(mc, c, 2); }
+int encode_pop_r8(MachineCode* mc) { uint8_t c[] = {0x41, 0x58}; return append_bytes(mc, c, 2); }
+int encode_push_r9(MachineCode* mc) { uint8_t c[] = {0x41, 0x51}; return append_bytes(mc, c, 2); }
+int encode_pop_r9(MachineCode* mc) { uint8_t c[] = {0x41, 0x59}; return append_bytes(mc, c, 2); }
+int encode_push_r10(MachineCode* mc) { uint8_t c[] = {0x41, 0x52}; return append_bytes(mc, c, 2); }
+int encode_pop_r10(MachineCode* mc) { uint8_t c[] = {0x41, 0x5A}; return append_bytes(mc, c, 2); }
 
 // === MOV OPERATIONS ===
-int encode_mov_rbp_rsp(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x89, 0xE5};
-    return append_bytes(mc, c, 3);
-}
+int encode_mov_rbp_rsp(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xE5}; return append_bytes(mc, c, 3); }
+int encode_mov_rsp_rbp(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xEC}; return append_bytes(mc, c, 3); }
+int encode_mov_rbp_rdi(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0x7D, 0xF8}; return append_bytes(mc, c, 4); }
 
-int encode_mov_rsp_rbp(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x89, 0xEC};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_mov_rbp_rdi(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x89, 0x7D, 0xF8};
-    return append_bytes(mc, c, 4);
-}
-
+// Immediate moves
 int encode_mov_rax_imm32(MachineCode* mc, int32_t v) {
-    uint8_t c[7] = {0x48, 0xC7, 0xC0};
-    memcpy(c + 3, &v, 4);
-    return append_bytes(mc, c, 7);
+    uint8_t c[7] = {0x48, 0xC7, 0xC0}; memcpy(c + 3, &v, 4); return append_bytes(mc, c, 7);
 }
-
 int encode_mov_rax_imm64(MachineCode* mc, int64_t v) {
-    uint8_t c[10] = {0x48, 0xB8};
-    memcpy(c + 2, &v, 8);
-    return append_bytes(mc, c, 10);
+    uint8_t c[10] = {0x48, 0xB8}; memcpy(c + 2, &v, 8); return append_bytes(mc, c, 10);
 }
-
 int encode_mov_rbx_imm32(MachineCode* mc, int32_t v) {
-    uint8_t c[7] = {0x48, 0xC7, 0xC3};
-    memcpy(c + 3, &v, 4);
-    return append_bytes(mc, c, 7);
+    uint8_t c[7] = {0x48, 0xC7, 0xC3}; memcpy(c + 3, &v, 4); return append_bytes(mc, c, 7);
 }
-
 int encode_mov_rcx_imm32(MachineCode* mc, int32_t v) {
-    uint8_t c[7] = {0x48, 0xC7, 0xC1};
-    memcpy(c + 3, &v, 4);
-    return append_bytes(mc, c, 7);
+    uint8_t c[7] = {0x48, 0xC7, 0xC1}; memcpy(c + 3, &v, 4); return append_bytes(mc, c, 7);
 }
-
 int encode_mov_rdx_imm32(MachineCode* mc, int32_t v) {
-    uint8_t c[7] = {0x48, 0xC7, 0xC2};
-    memcpy(c + 3, &v, 4);
-    return append_bytes(mc, c, 7);
+    uint8_t c[7] = {0x48, 0xC7, 0xC2}; memcpy(c + 3, &v, 4); return append_bytes(mc, c, 7);
 }
-
 int encode_mov_rdi_imm64(MachineCode* mc, uint64_t v) {
-    uint8_t c[10] = {0x48, 0xBF};
-    memcpy(c + 2, &v, 8);
-    return append_bytes(mc, c, 10);
+    uint8_t c[10] = {0x48, 0xBF}; memcpy(c + 2, &v, 8); return append_bytes(mc, c, 10);
+}
+int encode_mov_rsi_imm64(MachineCode* mc, uint64_t v) {
+    uint8_t c[10] = {0x48, 0xBE}; memcpy(c + 2, &v, 8); return append_bytes(mc, c, 10);
+}
+int encode_mov_rdi_imm32(MachineCode* mc, int32_t v) {
+    uint8_t c[7] = {0x48, 0xC7, 0xC7}; memcpy(c + 3, &v, 4); return append_bytes(mc, c, 7);
+}
+int encode_mov_rsi_imm32(MachineCode* mc, int32_t v) {
+    uint8_t c[7] = {0x48, 0xC7, 0xC6}; memcpy(c + 3, &v, 4); return append_bytes(mc, c, 7);
+}
+int encode_mov_rdx_imm64(MachineCode* mc, uint64_t v) {
+    uint8_t c[10] = {0x48, 0xBA}; memcpy(c + 2, &v, 8); return append_bytes(mc, c, 10);
 }
 
-int encode_mov_rsi_imm64(MachineCode* mc, uint64_t v) {
-    uint8_t c[10] = {0x48, 0xBE};
-    memcpy(c + 2, &v, 8);
-    return append_bytes(mc, c, 10);
+// Extended register immediates
+int encode_mov_r8_imm64(MachineCode* mc, uint64_t v) {
+    uint8_t c[10] = {0x49, 0xB8}; memcpy(c + 2, &v, 8); return append_bytes(mc, c, 10);
 }
+int encode_mov_r9_imm64(MachineCode* mc, uint64_t v) {
+    uint8_t c[10] = {0x49, 0xB9}; memcpy(c + 2, &v, 8); return append_bytes(mc, c, 10);
+}
+int encode_mov_r10_imm64(MachineCode* mc, uint64_t v) {
+    uint8_t c[10] = {0x49, 0xBA}; memcpy(c + 2, &v, 8); return append_bytes(mc, c, 10);
+}
+
+// Extended register transfers
+int encode_mov_r8_rax(MachineCode* mc) { uint8_t c[] = {0x49, 0x89, 0xC0}; return append_bytes(mc, c, 3); }
+int encode_mov_r9_rax(MachineCode* mc) { uint8_t c[] = {0x49, 0x89, 0xC1}; return append_bytes(mc, c, 3); }
+int encode_mov_r10_rax(MachineCode* mc) { uint8_t c[] = {0x49, 0x89, 0xC2}; return append_bytes(mc, c, 3); }
+int encode_mov_rax_r8(MachineCode* mc) { uint8_t c[] = {0x4C, 0x89, 0xC0}; return append_bytes(mc, c, 3); }
+int encode_mov_rax_r9(MachineCode* mc) { uint8_t c[] = {0x4C, 0x89, 0xC8}; return append_bytes(mc, c, 3); }
+int encode_mov_rax_r10(MachineCode* mc) { uint8_t c[] = {0x4C, 0x89, 0xD0}; return append_bytes(mc, c, 3); }
 
 // Register to register
-int encode_mov_rax_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x89, 0xD8};
-    return append_bytes(mc, c, 3);
-}
+int encode_mov_rax_rbx(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xD8}; return append_bytes(mc, c, 3); }
+int encode_mov_rbx_rax(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xC3}; return append_bytes(mc, c, 3); }
+int encode_mov_rcx_rax(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xC1}; return append_bytes(mc, c, 3); }
+int encode_mov_rdi_rax(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xC7}; return append_bytes(mc, c, 3); }
+int encode_mov_rsi_rax(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xC6}; return append_bytes(mc, c, 3); }
+int encode_mov_rdx_rax(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xC2}; return append_bytes(mc, c, 3); }
+int encode_mov_rax_rdi(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xF8}; return append_bytes(mc, c, 3); }
+int encode_mov_rax_rsi(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xF0}; return append_bytes(mc, c, 3); }
+int encode_mov_rax_rdx(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xD0}; return append_bytes(mc, c, 3); }
+int encode_mov_rax_rcx(MachineCode* mc) { uint8_t c[] = {0x48, 0x89, 0xC8}; return append_bytes(mc, c, 3); }
 
-int encode_mov_rbx_rax(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x89, 0xC3};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_mov_rcx_rax(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x89, 0xC1};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_mov_rdi_rax(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x89, 0xC7};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_mov_rsi_rax(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x89, 0xC6};
-    return append_bytes(mc, c, 3);
-}
-
-// Memory operations
+// Memory operations (RBP-relative with 32-bit displacement)
 int encode_mov_rax_from_memory(MachineCode* mc, int off) {
     uint8_t c[] = {0x48, 0x8B, 0x85};
     if (append_bytes(mc, c, 3)) return -1;
     return append_bytes(mc, (uint8_t*)&off, 4);
 }
-
 int encode_mov_memory_from_rax(MachineCode* mc, int off) {
     uint8_t c[] = {0x48, 0x89, 0x85};
     if (append_bytes(mc, c, 3)) return -1;
     return append_bytes(mc, (uint8_t*)&off, 4);
 }
-
 int encode_mov_rbx_from_memory(MachineCode* mc, int off) {
     uint8_t c[] = {0x48, 0x8B, 0x9D};
     if (append_bytes(mc, c, 3)) return -1;
     return append_bytes(mc, (uint8_t*)&off, 4);
 }
-
 int encode_mov_memory_from_rbx(MachineCode* mc, int off) {
     uint8_t c[] = {0x48, 0x89, 0x9D};
     if (append_bytes(mc, c, 3)) return -1;
     return append_bytes(mc, (uint8_t*)&off, 4);
 }
+int encode_mov_rdi_from_memory(MachineCode* mc, int off) {
+    uint8_t c[] = {0x48, 0x8B, 0xBD};
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+int encode_mov_rsi_from_memory(MachineCode* mc, int off) {
+    uint8_t c[] = {0x48, 0x8B, 0xB5};
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+int encode_mov_rdx_from_memory(MachineCode* mc, int off) {
+    uint8_t c[] = {0x48, 0x8B, 0x95};
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+
+// 8-bit memory operations (for byte/octeto)
+int encode_mov_al_from_memory(MachineCode* mc, int off) {
+    uint8_t c[] = {0x8A, 0x85};
+    if (append_bytes(mc, c, 2)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+int encode_mov_memory_from_al(MachineCode* mc, int off) {
+    uint8_t c[] = {0x88, 0x85};
+    if (append_bytes(mc, c, 2)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+int encode_movzx_rax_byte_memory(MachineCode* mc, int off) {
+    uint8_t c[] = {0x48, 0x0F, 0xB6, 0x85};
+    if (append_bytes(mc, c, 4)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+int encode_movsx_rax_byte_memory(MachineCode* mc, int off) {
+    uint8_t c[] = {0x48, 0x0F, 0xBE, 0x85};
+    if (append_bytes(mc, c, 4)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+
+// Indirect memory addressing (for arrays and pointers)
+int encode_mov_rax_from_rax_ptr(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x8B, 0x00};  // mov rax, [rax]
+    return append_bytes(mc, c, 3);
+}
+int encode_mov_rax_from_rbx_ptr(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x8B, 0x03};  // mov rax, [rbx]
+    return append_bytes(mc, c, 3);
+}
+int encode_mov_rax_from_rax_off(MachineCode* mc, int32_t off) {
+    uint8_t c[] = {0x48, 0x8B, 0x80};  // mov rax, [rax+disp32]
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+int encode_mov_rbx_ptr_from_rax(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x89, 0x03};  // mov [rbx], rax
+    return append_bytes(mc, c, 3);
+}
+int encode_mov_rax_off_from_rbx(MachineCode* mc, int32_t off) {
+    uint8_t c[] = {0x48, 0x89, 0x98};  // mov [rax+disp32], rbx
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+
+// Byte indirect
+int encode_mov_al_from_rbx_ptr(MachineCode* mc) {
+    uint8_t c[] = {0x8A, 0x03};  // mov al, [rbx]
+    return append_bytes(mc, c, 2);
+}
+int encode_mov_rbx_ptr_from_al(MachineCode* mc) {
+    uint8_t c[] = {0x88, 0x03};  // mov [rbx], al
+    return append_bytes(mc, c, 2);
+}
+int encode_movzx_rax_byte_rbx_ptr(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x0F, 0xB6, 0x03};  // movzx rax, byte [rbx]
+    return append_bytes(mc, c, 4);
+}
+
+// Array indexing: mov rax, [rbx + rax*scale]
+int encode_mov_rax_from_indexed(MachineCode* mc, int scale) {
+    // SIB byte: scale=log2(scale), index=rax, base=rbx
+    uint8_t ss = (scale == 8) ? 3 : (scale == 4) ? 2 : (scale == 2) ? 1 : 0;
+    uint8_t c[] = {0x48, 0x8B, 0x04, (uint8_t)((ss << 6) | 0x03)};  // mov rax, [rbx + rax*scale]
+    return append_bytes(mc, c, 4);
+}
+int encode_mov_indexed_from_rax(MachineCode* mc, int scale) {
+    uint8_t ss = (scale == 8) ? 3 : (scale == 4) ? 2 : (scale == 2) ? 1 : 0;
+    uint8_t c[] = {0x48, 0x89, 0x04, (uint8_t)((ss << 6) | 0x0B)};  // mov [rbx + rcx*scale], rax
+    return append_bytes(mc, c, 4);
+}
+int encode_mov_byte_indexed_from_al(MachineCode* mc) {
+    uint8_t c[] = {0x88, 0x04, 0x0B};  // mov [rbx + rcx], al
+    return append_bytes(mc, c, 3);
+}
 
 // === ARITHMETIC ===
-int encode_add_rax_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x01, 0xD8};
-    return append_bytes(mc, c, 3);
-}
-
+int encode_add_rax_rbx(MachineCode* mc) { uint8_t c[] = {0x48, 0x01, 0xD8}; return append_bytes(mc, c, 3); }
 int encode_add_rax_imm32(MachineCode* mc, int32_t v) {
-    uint8_t c[6] = {0x48, 0x05};
-    memcpy(c + 2, &v, 4);
-    return append_bytes(mc, c, 6);
+    uint8_t c[6] = {0x48, 0x05}; memcpy(c + 2, &v, 4); return append_bytes(mc, c, 6);
 }
-
-int encode_sub_rax_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x29, 0xD8};
-    return append_bytes(mc, c, 3);
-}
-
+int encode_sub_rax_rbx(MachineCode* mc) { uint8_t c[] = {0x48, 0x29, 0xD8}; return append_bytes(mc, c, 3); }
 int encode_sub_rax_imm32(MachineCode* mc, int32_t v) {
-    uint8_t c[6] = {0x48, 0x2D};
-    memcpy(c + 2, &v, 4);
-    return append_bytes(mc, c, 6);
+    uint8_t c[6] = {0x48, 0x2D}; memcpy(c + 2, &v, 4); return append_bytes(mc, c, 6);
 }
-
 int encode_sub_rsp_imm8(MachineCode* mc, int8_t v) {
-    uint8_t c[] = {0x48, 0x83, 0xEC, (uint8_t)v};
-    return append_bytes(mc, c, 4);
+    uint8_t c[] = {0x48, 0x83, 0xEC, (uint8_t)v}; return append_bytes(mc, c, 4);
 }
-
+int encode_sub_rsp_imm32(MachineCode* mc, int32_t v) {
+    uint8_t c[7] = {0x48, 0x81, 0xEC}; memcpy(c + 3, &v, 4); return append_bytes(mc, c, 7);
+}
 int encode_add_rsp_imm8(MachineCode* mc, int8_t v) {
-    uint8_t c[] = {0x48, 0x83, 0xC4, (uint8_t)v};
-    return append_bytes(mc, c, 4);
+    uint8_t c[] = {0x48, 0x83, 0xC4, (uint8_t)v}; return append_bytes(mc, c, 4);
 }
-
+int encode_add_rsp_imm32(MachineCode* mc, int32_t v) {
+    uint8_t c[7] = {0x48, 0x81, 0xC4}; memcpy(c + 3, &v, 4); return append_bytes(mc, c, 7);
+}
 int encode_mul_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x0F, 0xAF, 0xC3};
+    uint8_t c[] = {0x48, 0x0F, 0xAF, 0xC3};  // imul rax, rbx
     return append_bytes(mc, c, 4);
 }
-
 int encode_div_rbx(MachineCode* mc) {
     uint8_t a[] = {0x48, 0x31, 0xD2};  // xor rdx, rdx
     uint8_t b[] = {0x48, 0xF7, 0xF3};  // div rbx
     if (append_bytes(mc, a, 3)) return -1;
     return append_bytes(mc, b, 3);
 }
+int encode_neg_rax(MachineCode* mc) { uint8_t c[] = {0x48, 0xF7, 0xD8}; return append_bytes(mc, c, 3); }
+int encode_not_rax(MachineCode* mc) { uint8_t c[] = {0x48, 0xF7, 0xD0}; return append_bytes(mc, c, 3); }
 
-int encode_neg_rax(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0xF7, 0xD8};
+// === BITWISE OPERATIONS ===
+int encode_and_rax_rbx(MachineCode* mc) { uint8_t c[] = {0x48, 0x21, 0xD8}; return append_bytes(mc, c, 3); }
+int encode_and_rax_imm32(MachineCode* mc, int32_t v) {
+    uint8_t c[6] = {0x48, 0x25}; memcpy(c + 2, &v, 4); return append_bytes(mc, c, 6);
+}
+int encode_or_rax_rbx(MachineCode* mc) { uint8_t c[] = {0x48, 0x09, 0xD8}; return append_bytes(mc, c, 3); }
+int encode_or_rax_imm32(MachineCode* mc, int32_t v) {
+    uint8_t c[6] = {0x48, 0x0D}; memcpy(c + 2, &v, 4); return append_bytes(mc, c, 6);
+}
+int encode_xor_rax_rbx(MachineCode* mc) { uint8_t c[] = {0x48, 0x31, 0xD8}; return append_bytes(mc, c, 3); }
+int encode_xor_rax_imm32(MachineCode* mc, int32_t v) {
+    uint8_t c[6] = {0x48, 0x35}; memcpy(c + 2, &v, 4); return append_bytes(mc, c, 6);
+}
+int encode_xor_rax_rax(MachineCode* mc) { uint8_t c[] = {0x48, 0x31, 0xC0}; return append_bytes(mc, c, 3); }
+int encode_xor_rdx_rdx(MachineCode* mc) { uint8_t c[] = {0x48, 0x31, 0xD2}; return append_bytes(mc, c, 3); }
+int encode_xor_rdi_rdi(MachineCode* mc) { uint8_t c[] = {0x48, 0x31, 0xFF}; return append_bytes(mc, c, 3); }
+
+// Bit shifts (critical for bootstrap)
+int encode_shl_rax_imm8(MachineCode* mc, uint8_t count) {
+    uint8_t c[] = {0x48, 0xC1, 0xE0, count};
+    return append_bytes(mc, c, 4);
+}
+int encode_shr_rax_imm8(MachineCode* mc, uint8_t count) {
+    uint8_t c[] = {0x48, 0xC1, 0xE8, count};
+    return append_bytes(mc, c, 4);
+}
+int encode_sar_rax_imm8(MachineCode* mc, uint8_t count) {
+    uint8_t c[] = {0x48, 0xC1, 0xF8, count};
+    return append_bytes(mc, c, 4);
+}
+int encode_shl_rax_cl(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0xD3, 0xE0};  // shl rax, cl
     return append_bytes(mc, c, 3);
 }
-
-int encode_not_rax(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0xF7, 0xD0};
+int encode_shr_rax_cl(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0xD3, 0xE8};  // shr rax, cl
+    return append_bytes(mc, c, 3);
+}
+int encode_sar_rax_cl(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0xD3, 0xF8};  // sar rax, cl
     return append_bytes(mc, c, 3);
 }
 
 // === COMPARISONS ===
-int encode_cmp_rax_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x39, 0xD8};
-    return append_bytes(mc, c, 3);
-}
-
+int encode_cmp_rax_rbx(MachineCode* mc) { uint8_t c[] = {0x48, 0x39, 0xD8}; return append_bytes(mc, c, 3); }
 int encode_cmp_rax_imm32(MachineCode* mc, int32_t v) {
-    uint8_t c[6] = {0x48, 0x3D};
-    memcpy(c + 2, &v, 4);
-    return append_bytes(mc, c, 6);
+    uint8_t c[6] = {0x48, 0x3D}; memcpy(c + 2, &v, 4); return append_bytes(mc, c, 6);
 }
-
 int encode_cmp_rax_zero(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x83, 0xF8, 0x00};
-    return append_bytes(mc, c, 4);
+    uint8_t c[] = {0x48, 0x83, 0xF8, 0x00}; return append_bytes(mc, c, 4);
 }
-
-int encode_test_rax_rax(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x85, 0xC0};
-    return append_bytes(mc, c, 3);
-}
+int encode_test_rax_rax(MachineCode* mc) { uint8_t c[] = {0x48, 0x85, 0xC0}; return append_bytes(mc, c, 3); }
 
 // Set byte based on flags
-int encode_sete_al(MachineCode* mc) {
-    uint8_t c[] = {0x0F, 0x94, 0xC0};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_setne_al(MachineCode* mc) {
-    uint8_t c[] = {0x0F, 0x95, 0xC0};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_setl_al(MachineCode* mc) {
-    uint8_t c[] = {0x0F, 0x9C, 0xC0};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_setg_al(MachineCode* mc) {
-    uint8_t c[] = {0x0F, 0x9F, 0xC0};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_setle_al(MachineCode* mc) {
-    uint8_t c[] = {0x0F, 0x9E, 0xC0};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_setge_al(MachineCode* mc) {
-    uint8_t c[] = {0x0F, 0x9D, 0xC0};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_movzx_rax_al(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x0F, 0xB6, 0xC0};
-    return append_bytes(mc, c, 4);
-}
+int encode_sete_al(MachineCode* mc) { uint8_t c[] = {0x0F, 0x94, 0xC0}; return append_bytes(mc, c, 3); }
+int encode_setne_al(MachineCode* mc) { uint8_t c[] = {0x0F, 0x95, 0xC0}; return append_bytes(mc, c, 3); }
+int encode_setl_al(MachineCode* mc) { uint8_t c[] = {0x0F, 0x9C, 0xC0}; return append_bytes(mc, c, 3); }
+int encode_setg_al(MachineCode* mc) { uint8_t c[] = {0x0F, 0x9F, 0xC0}; return append_bytes(mc, c, 3); }
+int encode_setle_al(MachineCode* mc) { uint8_t c[] = {0x0F, 0x9E, 0xC0}; return append_bytes(mc, c, 3); }
+int encode_setge_al(MachineCode* mc) { uint8_t c[] = {0x0F, 0x9D, 0xC0}; return append_bytes(mc, c, 3); }
+int encode_movzx_rax_al(MachineCode* mc) { uint8_t c[] = {0x48, 0x0F, 0xB6, 0xC0}; return append_bytes(mc, c, 4); }
 
 // === JUMPS ===
 int encode_jmp_rel32(MachineCode* mc, int32_t off) {
-    uint8_t c[5] = {0xE9};
-    memcpy(c + 1, &off, 4);
-    return append_bytes(mc, c, 5);
+    uint8_t c[5] = {0xE9}; memcpy(c + 1, &off, 4); return append_bytes(mc, c, 5);
 }
-
 int encode_je_rel32(MachineCode* mc, int32_t off) {
-    uint8_t c[6] = {0x0F, 0x84};
-    memcpy(c + 2, &off, 4);
-    return append_bytes(mc, c, 6);
+    uint8_t c[6] = {0x0F, 0x84}; memcpy(c + 2, &off, 4); return append_bytes(mc, c, 6);
 }
-
 int encode_jne_rel32(MachineCode* mc, int32_t off) {
-    uint8_t c[6] = {0x0F, 0x85};
-    memcpy(c + 2, &off, 4);
-    return append_bytes(mc, c, 6);
+    uint8_t c[6] = {0x0F, 0x85}; memcpy(c + 2, &off, 4); return append_bytes(mc, c, 6);
 }
-
 int encode_jl_rel32(MachineCode* mc, int32_t off) {
-    uint8_t c[6] = {0x0F, 0x8C};
-    memcpy(c + 2, &off, 4);
-    return append_bytes(mc, c, 6);
+    uint8_t c[6] = {0x0F, 0x8C}; memcpy(c + 2, &off, 4); return append_bytes(mc, c, 6);
 }
-
 int encode_jg_rel32(MachineCode* mc, int32_t off) {
-    uint8_t c[6] = {0x0F, 0x8F};
-    memcpy(c + 2, &off, 4);
-    return append_bytes(mc, c, 6);
+    uint8_t c[6] = {0x0F, 0x8F}; memcpy(c + 2, &off, 4); return append_bytes(mc, c, 6);
 }
-
 int encode_jle_rel32(MachineCode* mc, int32_t off) {
-    uint8_t c[6] = {0x0F, 0x8E};
-    memcpy(c + 2, &off, 4);
-    return append_bytes(mc, c, 6);
+    uint8_t c[6] = {0x0F, 0x8E}; memcpy(c + 2, &off, 4); return append_bytes(mc, c, 6);
 }
-
 int encode_jge_rel32(MachineCode* mc, int32_t off) {
-    uint8_t c[6] = {0x0F, 0x8D};
-    memcpy(c + 2, &off, 4);
-    return append_bytes(mc, c, 6);
+    uint8_t c[6] = {0x0F, 0x8D}; memcpy(c + 2, &off, 4); return append_bytes(mc, c, 6);
 }
-
-// Short jumps (8-bit offset)
 int encode_jmp_rel8(MachineCode* mc, int8_t off) {
-    uint8_t c[] = {0xEB, (uint8_t)off};
-    return append_bytes(mc, c, 2);
+    uint8_t c[] = {0xEB, (uint8_t)off}; return append_bytes(mc, c, 2);
 }
-
 int encode_je_rel8(MachineCode* mc, int8_t off) {
-    uint8_t c[] = {0x74, (uint8_t)off};
-    return append_bytes(mc, c, 2);
+    uint8_t c[] = {0x74, (uint8_t)off}; return append_bytes(mc, c, 2);
 }
-
 int encode_jne_rel8(MachineCode* mc, int8_t off) {
-    uint8_t c[] = {0x75, (uint8_t)off};
-    return append_bytes(mc, c, 2);
+    uint8_t c[] = {0x75, (uint8_t)off}; return append_bytes(mc, c, 2);
 }
 
 // === CALL/RET ===
 int encode_call_rel32(MachineCode* mc, int32_t off) {
-    uint8_t c[5] = {0xE8};
-    memcpy(c + 1, &off, 4);
-    return append_bytes(mc, c, 5);
+    uint8_t c[5] = {0xE8}; memcpy(c + 1, &off, 4); return append_bytes(mc, c, 5);
 }
-
 int encode_call_printf(MachineCode* mc) {
-    uint8_t c[] = {0xE8, 0x00, 0x00, 0x00, 0x00};
-    return append_bytes(mc, c, 5);
+    uint8_t c[] = {0xE8, 0x00, 0x00, 0x00, 0x00}; return append_bytes(mc, c, 5);
 }
-
 int encode_call_external(MachineCode* mc) {
-    uint8_t c[] = {0xE8, 0x00, 0x00, 0x00, 0x00};
-    return append_bytes(mc, c, 5);
+    uint8_t c[] = {0xE8, 0x00, 0x00, 0x00, 0x00}; return append_bytes(mc, c, 5);
 }
-
-int encode_ret(MachineCode* mc) {
-    uint8_t c[] = {0xC3};
-    return append_bytes(mc, c, 1);
-}
-
-int encode_leave(MachineCode* mc) {
-    uint8_t c[] = {0xC9};
-    return append_bytes(mc, c, 1);
-}
-
-// === LOGICAL ===
-int encode_and_rax_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x21, 0xD8};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_or_rax_rbx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x09, 0xD8};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_xor_rax_rax(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x31, 0xC0};
-    return append_bytes(mc, c, 3);
-}
-
-int encode_xor_rdx_rdx(MachineCode* mc) {
-    uint8_t c[] = {0x48, 0x31, 0xD2};
-    return append_bytes(mc, c, 3);
-}
-
-// === NOP ===
-int encode_nop(MachineCode* mc) {
-    uint8_t c[] = {0x90};
-    return append_bytes(mc, c, 1);
-}
-
-// === SYSCALL (Linux) ===
-int encode_syscall(MachineCode* mc) {
-    uint8_t c[] = {0x0F, 0x05};
+int encode_call_rax(MachineCode* mc) {
+    uint8_t c[] = {0xFF, 0xD0};  // call rax
     return append_bytes(mc, c, 2);
 }
+int encode_ret(MachineCode* mc) { uint8_t c[] = {0xC3}; return append_bytes(mc, c, 1); }
+int encode_leave(MachineCode* mc) { uint8_t c[] = {0xC9}; return append_bytes(mc, c, 1); }
 
-// === LEA ===
+// === MISC ===
+int encode_nop(MachineCode* mc) { uint8_t c[] = {0x90}; return append_bytes(mc, c, 1); }
+int encode_syscall(MachineCode* mc) { uint8_t c[] = {0x0F, 0x05}; return append_bytes(mc, c, 2); }
+
+// LEA instructions
 int encode_lea_rax_rip_rel(MachineCode* mc, int32_t off) {
-    uint8_t c[7] = {0x48, 0x8D, 0x05};
-    memcpy(c + 3, &off, 4);
-    return append_bytes(mc, c, 7);
+    uint8_t c[7] = {0x48, 0x8D, 0x05}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
 }
-
 int encode_lea_rdi_rip_rel(MachineCode* mc, int32_t off) {
-    uint8_t c[7] = {0x48, 0x8D, 0x3D};
-    memcpy(c + 3, &off, 4);
-    return append_bytes(mc, c, 7);
+    uint8_t c[7] = {0x48, 0x8D, 0x3D}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
 }
-
 int encode_lea_rsi_rip_rel(MachineCode* mc, int32_t off) {
-    uint8_t c[7] = {0x48, 0x8D, 0x35};
-    memcpy(c + 3, &off, 4);
-    return append_bytes(mc, c, 7);
+    uint8_t c[7] = {0x48, 0x8D, 0x35}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
+}
+int encode_lea_rax_rbp_off(MachineCode* mc, int32_t off) {
+    uint8_t c[7] = {0x48, 0x8D, 0x85}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
+}
+int encode_lea_rbx_rbp_off(MachineCode* mc, int32_t off) {
+    uint8_t c[7] = {0x48, 0x8D, 0x9D}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
+}
+int encode_lea_rdi_rbp_off(MachineCode* mc, int32_t off) {
+    uint8_t c[7] = {0x48, 0x8D, 0xBD}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
+}
+int encode_lea_rsi_rbp_off(MachineCode* mc, int32_t off) {
+    uint8_t c[7] = {0x48, 0x8D, 0xB5}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
 }
 
 // === RELOCATIONS ===
@@ -462,9 +428,7 @@ int add_relocation_entry(MachineCode* mc, uint32_t sym, uint32_t type, int64_t a
 }
 
 // === LABEL MANAGEMENT ===
-int get_current_offset(MachineCode* mc) {
-    return mc ? mc->size : 0;
-}
+int get_current_offset(MachineCode* mc) { return mc ? mc->size : 0; }
 
 void patch_jump_offset(MachineCode* mc, int jump_pos, int target_pos) {
     if (!mc || jump_pos < 0 || jump_pos + 4 > (int)mc->size) return;
@@ -559,7 +523,7 @@ int write_complete_elf_file(ELFFile* e, const char* filename) {
     if (!e || !filename) return -1;
     FILE* f = fopen(filename, "wb");
     if (!f) return -1;
-    
+
     uint64_t off = sizeof(Elf64_Ehdr);
     for (int i = 0; i < e->num_sections; i++) {
         if (e->sections[i]->size > 0) {
@@ -568,23 +532,23 @@ int write_complete_elf_file(ELFFile* e, const char* filename) {
             off += e->sections[i]->size;
         }
     }
-    
+
     e->header.e_shnum = e->num_sections + 1;
     e->header.e_shoff = off;
-    
+
     fwrite(&e->header, sizeof(Elf64_Ehdr), 1, f);
-    
+
     for (int i = 0; i < e->num_sections; i++) {
         if (e->sections[i]->data && e->sections[i]->size > 0) {
             fseek(f, e->sections[i]->offset, SEEK_SET);
             fwrite(e->sections[i]->data, 1, e->sections[i]->size, f);
         }
     }
-    
+
     fseek(f, off, SEEK_SET);
     Elf64_Shdr null_sh = {0};
     fwrite(&null_sh, sizeof(Elf64_Shdr), 1, f);
-    
+
     for (int i = 0; i < e->num_sections; i++) {
         Elf64_Shdr sh = {0};
         sh.sh_type = e->sections[i]->type;
@@ -595,7 +559,102 @@ int write_complete_elf_file(ELFFile* e, const char* filename) {
         sh.sh_entsize = e->sections[i]->entsize;
         fwrite(&sh, sizeof(Elf64_Shdr), 1, f);
     }
-    
+
+    fclose(f);
+    return 0;
+}
+
+// === STANDALONE EXECUTABLE (no libc) ===
+// Creates a standalone ELF executable that uses syscalls directly
+typedef struct {
+    uint32_t p_type;
+    uint32_t p_flags;
+    uint64_t p_offset;
+    uint64_t p_vaddr;
+    uint64_t p_paddr;
+    uint64_t p_filesz;
+    uint64_t p_memsz;
+    uint64_t p_align;
+} Elf64_Phdr;
+
+#define PT_LOAD 1
+#define PF_X 1
+#define PF_W 2
+#define PF_R 4
+
+int write_standalone_elf(ELFFile* e, MachineCode* mc, uint8_t* data, size_t data_size, const char* filename) {
+    if (!filename || !mc) return -1;
+    FILE* f = fopen(filename, "wb");
+    if (!f) return -1;
+
+    // Setup for standalone executable
+    uint64_t base_addr = 0x400000;
+    uint64_t text_vaddr = base_addr + 0x1000;
+    uint64_t data_vaddr = (text_vaddr + mc->size + 0xFFF) & ~0xFFF;
+
+    // ELF header for executable
+    Elf64_Ehdr hdr = {0};
+    hdr.e_ident[0] = 0x7f;
+    hdr.e_ident[1] = 'E';
+    hdr.e_ident[2] = 'L';
+    hdr.e_ident[3] = 'F';
+    hdr.e_ident[4] = ELFCLASS64;
+    hdr.e_ident[5] = ELFDATA2LSB;
+    hdr.e_ident[6] = EV_CURRENT;
+    hdr.e_type = ET_EXEC;
+    hdr.e_machine = EM_X86_64;
+    hdr.e_version = EV_CURRENT;
+    hdr.e_entry = text_vaddr;  // Entry point
+    hdr.e_phoff = sizeof(Elf64_Ehdr);
+    hdr.e_ehsize = sizeof(Elf64_Ehdr);
+    hdr.e_phentsize = sizeof(Elf64_Phdr);
+    hdr.e_phnum = (data_size > 0) ? 2 : 1;
+
+    // Program headers
+    Elf64_Phdr text_ph = {0};
+    text_ph.p_type = PT_LOAD;
+    text_ph.p_flags = PF_R | PF_X;
+    text_ph.p_offset = 0x1000;
+    text_ph.p_vaddr = text_vaddr;
+    text_ph.p_paddr = text_vaddr;
+    text_ph.p_filesz = mc->size;
+    text_ph.p_memsz = mc->size;
+    text_ph.p_align = 0x1000;
+
+    Elf64_Phdr data_ph = {0};
+    if (data_size > 0) {
+        data_ph.p_type = PT_LOAD;
+        data_ph.p_flags = PF_R | PF_W;
+        data_ph.p_offset = 0x2000;
+        data_ph.p_vaddr = data_vaddr;
+        data_ph.p_paddr = data_vaddr;
+        data_ph.p_filesz = data_size;
+        data_ph.p_memsz = data_size;
+        data_ph.p_align = 0x1000;
+    }
+
+    // Write ELF header
+    fwrite(&hdr, sizeof(Elf64_Ehdr), 1, f);
+
+    // Write program headers
+    fwrite(&text_ph, sizeof(Elf64_Phdr), 1, f);
+    if (data_size > 0) {
+        fwrite(&data_ph, sizeof(Elf64_Phdr), 1, f);
+    }
+
+    // Pad to text segment
+    uint8_t zero = 0;
+    while (ftell(f) < 0x1000) fwrite(&zero, 1, 1, f);
+
+    // Write text (code)
+    fwrite(mc->code, 1, mc->size, f);
+
+    // Pad to data segment
+    if (data_size > 0) {
+        while (ftell(f) < 0x2000) fwrite(&zero, 1, 1, f);
+        fwrite(data, 1, data_size, f);
+    }
+
     fclose(f);
     return 0;
 }
