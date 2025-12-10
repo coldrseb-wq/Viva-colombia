@@ -1,21 +1,13 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g -Iinclude
-SRCDIR = src
-OBJDIR = build
-SOURCES = $(wildcard $(SRCDIR)/*.c)
-OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
-TARGET = viva
+# Viva Colombia - Root Makefile
 
-all: $(TARGET)
+.PHONY: all clean compiler
 
-$(TARGET): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $(TARGET)
+all: compiler
+	cp compiler/viva .
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.c
-	@mkdir -p $(OBJDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+compiler:
+	$(MAKE) -C compiler
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET)
-
-.PHONY: all clean
+	$(MAKE) -C compiler clean
+	rm -f viva
