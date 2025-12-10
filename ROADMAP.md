@@ -38,19 +38,19 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 
 ### Status: COMPLETED
 
-## Phase 3: Assembly-to-Machine Code Transition (IN PROGRESS)
+## Phase 3: Assembly-to-Machine Code Transition (COMPLETED)
 ### Objectives:
 - Fix assembly generation structural issues
 - Generate syntactically correct x86-64 assembly
 - Implement proper string literal handling
 
-### Current Tasks:
+### Completed Tasks:
 - ✅ Assembly structure (data before code sections)
 - ✅ String literal label generation and reference
 - ✅ Proper x86-64 instruction syntax
 - ✅ Cross-platform assembly compatibility
 
-### Status: IN PROGRESS
+### Status: COMPLETED
 
 ## Phase 4: Object File Generation (COMPLETED)
 ### Objectives:
@@ -98,12 +98,19 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Complete expression evaluation in machine code including comparison operations
 - ✅ Proper conditional jump handling with offset calculation in ELF mode
 - ✅ Assignment operation fixes for all output modes
+- ✅ **CRITICAL FIX**: Added `body` field to ASTNode - control flow bodies no longer overwritten
+- ✅ Cross-platform compiler wiring - finish_compiler() now correctly calls platform-specific writers
+- ✅ While loops execute correct body content
+- ✅ If/else statements execute correct then/else blocks
+- ✅ Nested control flow statements work correctly
+- ✅ Comprehensive stress test suite added (stress_test.viva)
 
 ### Current Tasks:
 - [ ] Advanced machine code optimization passes
 - [ ] Memory management in machine code
 - [ ] Function definition support in machine code
 - [ ] Complete Colombian cultural features
+- [ ] Fix `!=`, `<=`, `>=` operators in lexer/parser
 
 ### Status: IN PROGRESS
 
@@ -133,8 +140,21 @@ The Viva compiler has made tremendous progress toward direct machine code compil
 - ✅ Established foundation for optimization passes and advanced features
 - ✅ Cross-compilation capability: Generate code for Linux, macOS, and Windows from any platform
 - ✅ Command-line interface supporting cross-platform targeting with `-e -p [platform]` flags
+- ✅ **Control flow fully working**: if/else, while loops, nested conditionals all execute correctly
+- ✅ **C compilation produces runnable executables** that pass comprehensive stress tests
 
 The compiler now generates proper platform-specific object files (ELF, Mach-O, PE) that can be linked with system libraries, marking a major milestone toward rivaling Go and Rust for cross-platform direct machine code compilation.
+
+### Verified Working Features (via stress_test.viva):
+- Variables and assignments
+- Arithmetic operations (+, -, *, /)
+- Complex expressions with precedence
+- Comparison operators (<, >, ==)
+- If statements with else blocks
+- Nested conditionals
+- While loops with proper body execution
+- String handling and printing
+- Colombian hero functions (bolivar, garcia, etc.)
 
 ## Bootstrapping Path
 The progression toward a fully bootstrapped Viva compiler:
