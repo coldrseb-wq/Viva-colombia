@@ -17,6 +17,8 @@ typedef enum {
     NOT_EQUAL,      // For != operator
     LESS_THAN,      // For < operator
     GREATER_THAN,   // For > operator
+    LESS_EQUAL,     // For <= operator
+    GREATER_EQUAL,  // For >= operator
     LPAREN,
     RPAREN,
     LBRACE,

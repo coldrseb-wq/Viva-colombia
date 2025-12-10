@@ -37,8 +37,20 @@ si (b > a) {
     println("b > a: PASS");
 }
 
+si (a <= 10) {
+    println("a <= 10: PASS");
+}
+
+si (b >= 20) {
+    println("b >= 20: PASS");
+}
+
 si (a == 10) {
     println("a == 10: PASS");
+}
+
+si (a != b) {
+    println("a != b: PASS");
 }
 
 // === IF-ELSE CONDITIONALS ===

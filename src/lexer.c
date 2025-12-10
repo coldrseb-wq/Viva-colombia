@@ -156,8 +156,22 @@ TokenStream* tokenize(const char* source) {
                         type = UNKNOWN;
                     }
                     break;
-                case '<': type = LESS_THAN; break;
-                case '>': type = GREATER_THAN; break;
+                case '<':
+                    if (*(current + 1) == '=') {
+                        current++; // Skip next '='
+                        type = LESS_EQUAL;
+                    } else {
+                        type = LESS_THAN;
+                    }
+                    break;
+                case '>':
+                    if (*(current + 1) == '=') {
+                        current++; // Skip next '='
+                        type = GREATER_EQUAL;
+                    } else {
+                        type = GREATER_THAN;
+                    }
+                    break;
                 case '&':
                     if (*(current + 1) == '&') {
                         current++; // Skip next '&'
@@ -185,7 +199,16 @@ TokenStream* tokenize(const char* source) {
                 default: type = UNKNOWN; break;
             }
 
-            add_token(stream, init_token(type, ch, line));
+            // Set correct value for multi-char operators
+            const char* op_value = ch;
+            if (type == EQUALITY) op_value = "==";
+            else if (type == NOT_EQUAL) op_value = "!=";
+            else if (type == LESS_EQUAL) op_value = "<=";
+            else if (type == GREATER_EQUAL) op_value = ">=";
+            else if (type == Y) op_value = "&&";
+            else if (type == O) op_value = "||";
+
+            add_token(stream, init_token(type, (char*)op_value, line));
             current++;
         }
     }
