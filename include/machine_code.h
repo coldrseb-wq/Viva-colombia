@@ -108,6 +108,7 @@ typedef struct {
 // === ELF SECTION ===
 typedef struct {
     char* name;
+    uint32_t name_offset;  // Offset in .shstrtab
     uint32_t type;
     uint64_t flags;
     uint64_t addr;

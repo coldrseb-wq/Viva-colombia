@@ -389,18 +389,40 @@ static void compile_call(Compiler* c, ASTNode* n) {
         emit(c, "    ; call %s\n", fn);
         if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
             if (n->left && n->left->type == NUMBER_NODE) {
-                emit(c, "    mov rdi, fmt_d\n    mov rsi, %s\n", n->left->value);
+                emit(c, "    mov rsi, %s\n", n->left->value);
+                emit(c, "    mov rdi, fmt_d\n");
             } else if (n->left && n->left->type == BINARY_OP_NODE) {
                 compile_expr(c, n->left);
-                emit(c, "    mov rsi, rax\n    mov rdi, fmt_d\n");
-            } else if (n->left && n->left->type == IDENTIFIER_NODE && !is_var_str(c, n->left->value)) {
-                int off = get_var_off(c, n->left->value);
-                emit(c, "    mov rsi, [rbp%+d]\n    mov rdi, fmt_d\n", off);
-            } else if (n->left) {
+                emit(c, "    mov rsi, rax\n");
+                emit(c, "    mov rdi, fmt_d\n");
+            } else if (n->left && n->left->type == STRING_LITERAL_NODE) {
+                // String literal node
                 char* l = add_str(c, n->left->value);
-                emit(c, "    mov rdi, fmt_s\n    lea rsi, [%s]\n", l);
+                emit(c, "    lea rsi, [%s]\n", l);
+                emit(c, "    mov rdi, fmt_s\n");
+            } else if (n->left && n->left->type == IDENTIFIER_NODE &&
+                       n->left->value && n->left->value[0] == '"') {
+                // String literal stored as identifier (quoted string)
+                char* l = add_str(c, n->left->value);
+                emit(c, "    lea rsi, [%s]\n", l);
+                emit(c, "    mov rdi, fmt_s\n");
+            } else if (n->left && n->left->type == IDENTIFIER_NODE) {
+                int off = get_var_off(c, n->left->value);
+                if (is_var_str(c, n->left->value)) {
+                    // String variable - load pointer and use string format
+                    emit(c, "    mov rsi, [rbp%+d]\n", off);
+                    emit(c, "    mov rdi, fmt_s\n");
+                } else {
+                    // Integer variable - load value and use integer format
+                    emit(c, "    mov rsi, [rbp%+d]\n", off);
+                    emit(c, "    mov rdi, fmt_d\n");
+                }
+            } else {
+                emit(c, "    mov rdi, fmt_s\n");
+                emit(c, "    xor rsi, rsi\n");
             }
-            emit(c, "    xor rax,rax\n    call printf\n");
+            emit(c, "    xor rax, rax\n");
+            emit(c, "    call printf\n");
         }
         else {
             emit(c, "    call %s\n", fn);
@@ -738,21 +760,26 @@ static void compile_main(Compiler* c, ASTNode* ast) {
         emit(c, "int main() {\n");
         c->indent = 1;
     } else if (c->mode == OUT_ASM) {
-        // Strings written later
+        // Emit main label and prologue BEFORE the code
+        emit(c, "main:\n");
+        emit(c, "    push rbp\n");
+        emit(c, "    mov rbp, rsp\n");
+        emit(c, "    sub rsp, 256\n");
     } else if (c->mc) {
         encode_push_rbp(c->mc);
         encode_mov_rbp_rsp(c->mc);
         encode_sub_rsp_imm8(c->mc, 128);
     }
-    
+
     compile_node(c, ast);
-    
+
     if (c->mode == OUT_C) {
         emit(c, "    return 0;\n}\n");
     } else if (c->mode == OUT_ASM) {
-        emit(c, "main:\n    push rbp\n    mov rbp,rsp\n    sub rsp,256\n");
-        // Code already in buffer, append ending
-        emit(c, "    xor rax,rax\n    leave\n    ret\n");
+        // Emit epilogue after the code
+        emit(c, "    xor rax, rax\n");
+        emit(c, "    leave\n");
+        emit(c, "    ret\n");
     } else if (c->mc) {
         encode_xor_rax_rax(c->mc);
         encode_leave(c->mc);

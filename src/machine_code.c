@@ -550,17 +550,90 @@ void create_data_section(ELFFile* e, uint8_t* data, size_t size) {
 }
 
 void create_symbol_table(ELFFile* e) {
-    add_elf_section(e, ".strtab", SHT_STRTAB, 0);
-    int idx = add_elf_section(e, ".symtab", SHT_SYMTAB, 0);
-    if (idx >= 0) e->sections[idx]->entsize = sizeof(Elf64_Sym);
-    add_elf_section(e, ".shstrtab", SHT_STRTAB, 0);
+    // Create string table with symbol names: "\0main\0printf\0"
+    int strtab_idx = add_elf_section(e, ".strtab", SHT_STRTAB, 0);
+    if (strtab_idx >= 0) {
+        const char* strtab_data = "\0main\0printf\0";
+        size_t strtab_size = 14;  // 1 + 5 + 7 + 1 = null + "main\0" + "printf\0"
+        e->sections[strtab_idx]->data = malloc(strtab_size);
+        memcpy(e->sections[strtab_idx]->data, strtab_data, strtab_size);
+        e->sections[strtab_idx]->size = strtab_size;
+        e->strtab_section_idx = strtab_idx;
+    }
+
+    // Create symbol table with: null symbol, main symbol, printf symbol
+    int symtab_idx = add_elf_section(e, ".symtab", SHT_SYMTAB, 0);
+    if (symtab_idx >= 0) {
+        e->sections[symtab_idx]->entsize = sizeof(Elf64_Sym);
+        e->sections[symtab_idx]->link = strtab_idx + 1;  // Index of .strtab (1-based in section table)
+        e->sections[symtab_idx]->info = 2;  // First global symbol index
+
+        // Allocate space for 3 symbols: null, main, printf
+        size_t symtab_size = 3 * sizeof(Elf64_Sym);
+        Elf64_Sym* syms = calloc(3, sizeof(Elf64_Sym));
+
+        // Symbol 0: NULL symbol (required)
+        syms[0].st_name = 0;
+        syms[0].st_info = 0;
+        syms[0].st_other = 0;
+        syms[0].st_shndx = 0;
+        syms[0].st_value = 0;
+        syms[0].st_size = 0;
+
+        // Symbol 1: main (global function in .text)
+        syms[1].st_name = 1;  // Offset in strtab: "main"
+        syms[1].st_info = (1 << 4) | 2;  // STB_GLOBAL | STT_FUNC
+        syms[1].st_other = 0;
+        syms[1].st_shndx = e->text_section_idx + 1;  // .text section index (1-based)
+        syms[1].st_value = 0;  // Offset within section
+        syms[1].st_size = 0;
+
+        // Symbol 2: printf (undefined external)
+        syms[2].st_name = 6;  // Offset in strtab: "printf"
+        syms[2].st_info = (1 << 4) | 0;  // STB_GLOBAL | STT_NOTYPE
+        syms[2].st_other = 0;
+        syms[2].st_shndx = 0;  // SHN_UNDEF
+        syms[2].st_value = 0;
+        syms[2].st_size = 0;
+
+        e->sections[symtab_idx]->data = (uint8_t*)syms;
+        e->sections[symtab_idx]->size = symtab_size;
+        e->symtab_section_idx = symtab_idx;
+    }
+
+    // Create section header string table
+    int shstrtab_idx = add_elf_section(e, ".shstrtab", SHT_STRTAB, 0);
+    if (shstrtab_idx >= 0) {
+        // Build shstrtab: "\0.text\0.data\0.strtab\0.symtab\0.shstrtab\0"
+        // Offsets: 0=null, 1=.text, 7=.data, 13=.strtab, 21=.symtab, 29=.shstrtab
+        static const char shstrtab_data[] = "\0.text\0.data\0.strtab\0.symtab\0.shstrtab";
+        size_t shstrtab_size = sizeof(shstrtab_data);
+        e->sections[shstrtab_idx]->data = malloc(shstrtab_size);
+        memcpy(e->sections[shstrtab_idx]->data, shstrtab_data, shstrtab_size);
+        e->sections[shstrtab_idx]->size = shstrtab_size;
+        e->shstrtab_section_idx = shstrtab_idx;
+
+        // Set section name offsets
+        for (int i = 0; i < e->num_sections; i++) {
+            if (strcmp(e->sections[i]->name, ".text") == 0)
+                e->sections[i]->name_offset = 1;
+            else if (strcmp(e->sections[i]->name, ".data") == 0)
+                e->sections[i]->name_offset = 7;
+            else if (strcmp(e->sections[i]->name, ".strtab") == 0)
+                e->sections[i]->name_offset = 13;
+            else if (strcmp(e->sections[i]->name, ".symtab") == 0)
+                e->sections[i]->name_offset = 21;
+            else if (strcmp(e->sections[i]->name, ".shstrtab") == 0)
+                e->sections[i]->name_offset = 29;
+        }
+    }
 }
 
 int write_complete_elf_file(ELFFile* e, const char* filename) {
     if (!e || !filename) return -1;
     FILE* f = fopen(filename, "wb");
     if (!f) return -1;
-    
+
     uint64_t off = sizeof(Elf64_Ehdr);
     for (int i = 0; i < e->num_sections; i++) {
         if (e->sections[i]->size > 0) {
@@ -569,34 +642,44 @@ int write_complete_elf_file(ELFFile* e, const char* filename) {
             off += e->sections[i]->size;
         }
     }
-    
-    e->header.e_shnum = e->num_sections + 1;
+
+    // Set up ELF header
+    e->header.e_shnum = e->num_sections + 1;  // +1 for null section
     e->header.e_shoff = off;
-    
+    e->header.e_shstrndx = e->shstrtab_section_idx + 1;  // Index of .shstrtab (1-based)
+
     fwrite(&e->header, sizeof(Elf64_Ehdr), 1, f);
-    
+
+    // Write section data
     for (int i = 0; i < e->num_sections; i++) {
         if (e->sections[i]->data && e->sections[i]->size > 0) {
             fseek(f, e->sections[i]->offset, SEEK_SET);
             fwrite(e->sections[i]->data, 1, e->sections[i]->size, f);
         }
     }
-    
+
+    // Write section headers starting at e_shoff
     fseek(f, off, SEEK_SET);
+
+    // Section 0: NULL section header (required)
     Elf64_Shdr null_sh = {0};
     fwrite(&null_sh, sizeof(Elf64_Shdr), 1, f);
-    
+
+    // Write section headers for each section
     for (int i = 0; i < e->num_sections; i++) {
         Elf64_Shdr sh = {0};
+        sh.sh_name = e->sections[i]->name_offset;  // Offset in .shstrtab
         sh.sh_type = e->sections[i]->type;
         sh.sh_flags = e->sections[i]->flags;
         sh.sh_offset = e->sections[i]->offset;
         sh.sh_size = e->sections[i]->size;
         sh.sh_addralign = e->sections[i]->addralign;
         sh.sh_entsize = e->sections[i]->entsize;
+        sh.sh_link = e->sections[i]->link;
+        sh.sh_info = e->sections[i]->info;
         fwrite(&sh, sizeof(Elf64_Shdr), 1, f);
     }
-    
+
     fclose(f);
     return 0;
 }
