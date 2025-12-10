@@ -120,10 +120,10 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - [ ] **Recursive function support** - Call stack management (basic support exists)
 
 #### Data Structures (Critical)
-- [ ] **Arrays with indexing** - Parser exists (`parser.c:135`), needs codegen
-  - Array declaration: `decreto arr[10];`
-  - Array access: `arr[i]`
-  - Array assignment: `arr[i] = value;`
+- [x] **Arrays with indexing** - Full codegen implemented for all backends
+  - Array declaration: `decreto arr[10];` ✅
+  - Array access: `arr[i]` ✅
+  - Array assignment: `arr[i] = value;` ✅
 - [ ] **Structs/Records** - New feature needed
   - Struct definition: `estructura Token { tipo; valor; }`
   - Field access: `token.tipo`
@@ -175,7 +175,7 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 |---------|--------|----------|------------|--------------|
 | Function params | ✅ | ✅ | ✅ | ✅ |
 | User fn calls | ✅ | ✅ | ✅ | ✅ |
-| Arrays | ✅ | ❌ | ❌ | ❌ |
+| Arrays | ✅ | ✅ | ✅ | ✅ |
 | Structs | ❌ | ❌ | ❌ | ❌ |
 | Bitwise ops | ✅ | ✅ | ✅ | ✅ |
 | Shifts | ✅ | ✅ | ✅ | ✅ |

@@ -247,6 +247,22 @@ int encode_lea_rax_rip_rel(MachineCode* mc, int32_t off);
 int encode_lea_rdi_rip_rel(MachineCode* mc, int32_t off);
 int encode_lea_rsi_rip_rel(MachineCode* mc, int32_t off);
 
+// === ARRAY OPERATIONS ===
+// LEA rax, [rbp + offset] - load base address of array
+int encode_lea_rax_rbp_off(MachineCode* mc, int32_t off);
+// MOV rax, [rax + rbx*8] - load element at index (rbx contains index)
+int encode_mov_rax_rax_rbx8(MachineCode* mc);
+// MOV [rax + rbx*8], rcx - store value at index
+int encode_mov_rax_rbx8_rcx(MachineCode* mc);
+// IMUL rbx, rbx, 8 - multiply index by element size
+int encode_imul_rbx_8(MachineCode* mc);
+// ADD rax, rbx - add offset to base
+int encode_add_rax_rbx(MachineCode* mc);
+// MOV rax, [rax] - dereference pointer
+int encode_mov_rax_ptr_rax(MachineCode* mc);
+// MOV [rax], rbx - store through pointer
+int encode_mov_ptr_rax_rbx(MachineCode* mc);
+
 // === RELOCATIONS ===
 int add_relocation_entry(MachineCode* mc, uint32_t sym, uint32_t type, int64_t add);
 

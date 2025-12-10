@@ -516,6 +516,44 @@ int encode_syscall(MachineCode* mc) {
     return append_bytes(mc, c, 2);
 }
 
+// === ARRAY OPERATIONS ===
+// LEA rax, [rbp + offset] - load base address of array
+int encode_lea_rax_rbp_off(MachineCode* mc, int32_t off) {
+    uint8_t c[] = {0x48, 0x8D, 0x85};  // lea rax, [rbp + disp32]
+    if (append_bytes(mc, c, 3)) return -1;
+    return append_bytes(mc, (uint8_t*)&off, 4);
+}
+
+// MOV rax, [rax + rbx*8] - load element at index (rbx contains index * 8)
+int encode_mov_rax_rax_rbx8(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x8B, 0x04, 0xD8};  // mov rax, [rax + rbx*8]
+    return append_bytes(mc, c, 4);
+}
+
+// MOV [rax + rbx*8], rcx - store value at index
+int encode_mov_rax_rbx8_rcx(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x89, 0x0C, 0xD8};  // mov [rax + rbx*8], rcx
+    return append_bytes(mc, c, 4);
+}
+
+// SHL rbx, 3 - multiply index by 8 (shift left by 3)
+int encode_imul_rbx_8(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0xC1, 0xE3, 0x03};  // shl rbx, 3
+    return append_bytes(mc, c, 4);
+}
+
+// MOV rax, [rax] - dereference pointer
+int encode_mov_rax_ptr_rax(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x8B, 0x00};  // mov rax, [rax]
+    return append_bytes(mc, c, 3);
+}
+
+// MOV [rax], rbx - store through pointer
+int encode_mov_ptr_rax_rbx(MachineCode* mc) {
+    uint8_t c[] = {0x48, 0x89, 0x18};  // mov [rax], rbx
+    return append_bytes(mc, c, 3);
+}
+
 // === LEA ===
 int encode_lea_rax_rip_rel(MachineCode* mc, int32_t off) {
     uint8_t c[7] = {0x48, 0x8D, 0x05};

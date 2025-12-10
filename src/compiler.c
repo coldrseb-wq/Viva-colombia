@@ -18,7 +18,7 @@
 
 typedef enum { OUT_C, OUT_ASM, OUT_ELF } OutMode;
 
-typedef struct { char name[64]; int is_str; int offset; } Var;
+typedef struct { char name[64]; int is_str; int offset; int is_array; int array_size; } Var;
 typedef struct { char val[256]; char lbl[32]; int offset; } Str;
 typedef struct { char name[32]; int offset; } Label;
 typedef struct {
@@ -88,9 +88,28 @@ static int add_var(Compiler* c, const char* name, int is_str) {
     if (c->nvar >= MAX_VARS) return -1;
     strncpy(c->vars[c->nvar].name, name, 63);
     c->vars[c->nvar].is_str = is_str;
+    c->vars[c->nvar].is_array = 0;
+    c->vars[c->nvar].array_size = 0;
     c->stack_off -= 8;
     c->vars[c->nvar].offset = c->stack_off;
     return c->nvar++;
+}
+
+static int add_array_var(Compiler* c, const char* name, int size) {
+    if (c->nvar >= MAX_VARS) return -1;
+    strncpy(c->vars[c->nvar].name, name, 63);
+    c->vars[c->nvar].is_str = 0;
+    c->vars[c->nvar].is_array = 1;
+    c->vars[c->nvar].array_size = size;
+    // Allocate space for all elements (8 bytes each for 64-bit values)
+    c->stack_off -= 8 * size;
+    c->vars[c->nvar].offset = c->stack_off;  // Points to first element
+    return c->nvar++;
+}
+
+static int is_var_array(Compiler* c, const char* name) {
+    int i = find_var(c, name);
+    return (i >= 0) ? c->vars[i].is_array : 0;
 }
 
 static int get_var_off(Compiler* c, const char* name) {
@@ -417,6 +436,69 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             }
         }
     }
+    else if (n->type == ARRAY_ACCESS_NODE) {
+        // Array access: arr[index]
+        // n->value = array name, n->left = index expression
+        const char* arr_name = n->value;
+        if (c->mode == OUT_C) {
+            emit(c, "%s[", arr_name);
+            compile_expr(c, n->left);
+            emit(c, "]");
+        }
+        else if (c->mode == OUT_ASM) {
+            // Get base address of array
+            int base_off = get_var_off(c, arr_name);
+            // Compile index to rax
+            compile_expr(c, n->left);
+            // Calculate address: base + index * 8
+            emit(c, "    shl rax, 3\n");  // multiply by 8
+            emit(c, "    lea rbx, [rbp%+d]\n", base_off);
+            emit(c, "    add rax, rbx\n");
+            emit(c, "    mov rax, [rax]\n");  // load value
+        }
+        else if (c->mc) {
+            int base_off = get_var_off(c, arr_name);
+            // Compile index to rax
+            compile_expr(c, n->left);
+            encode_mov_rbx_rax(c->mc);  // rbx = index
+            encode_imul_rbx_8(c->mc);   // rbx = index * 8
+            encode_lea_rax_rbp_off(c->mc, base_off);  // rax = base address
+            encode_add_rax_rbx(c->mc);  // rax = base + index*8
+            encode_mov_rax_ptr_rax(c->mc);  // rax = *rax (load value)
+        }
+    }
+    else if (n->type == FN_CALL_NODE) {
+        // Function call in expression context - result in rax
+        const char* fn = n->value;
+        int func_idx = find_func(c, fn);
+
+        if (c->mode == OUT_C) {
+            emit(c, "%s(", fn);
+            if (n->left) compile_expr(c, n->left);
+            emit(c, ")");
+        }
+        else if (c->mode == OUT_ASM) {
+            if (func_idx >= 0) {
+                if (n->left) {
+                    compile_expr(c, n->left);
+                    emit(c, "    mov rdi, rax\n");
+                }
+                emit(c, "    call %s\n", fn);
+            }
+        }
+        else if (c->mc) {
+            if (func_idx >= 0) {
+                if (n->left) {
+                    compile_expr(c, n->left);
+                    encode_mov_rdi_rax(c->mc);
+                }
+                int call_pos = c->mc->size;
+                int func_offset = c->funcs[func_idx].code_offset;
+                int rel_offset = func_offset - (call_pos + 5);
+                encode_call_rel32(c->mc, rel_offset);
+            }
+        }
+    }
 }
 // === FUNCTION CALL ===
 // Helper to count arguments in a function call
@@ -463,6 +545,12 @@ static void compile_call(Compiler* c, ASTNode* n) {
                 compile_expr(c, n->left);
                 emit(c, ");\n");
             }
+            else if (n->left && n->left->type == ARRAY_ACCESS_NODE) {
+                // Handle array access: println(arr[i])
+                emit(c, "prt%snum(", ln?"ln":"");
+                compile_expr(c, n->left);
+                emit(c, ");\n");
+            }
             else emit(c, "prt%s(\"\");\n", ln?"ln":"");
         }
         else if (strstr(fn,"bolivar")) emit(c, "bolivar();\n");
@@ -491,6 +579,10 @@ static void compile_call(Compiler* c, ASTNode* n) {
             if (n->left && n->left->type == NUMBER_NODE) {
                 emit(c, "    mov rdi, fmt_d\n    mov rsi, %s\n", n->left->value);
             } else if (n->left && n->left->type == BINARY_OP_NODE) {
+                compile_expr(c, n->left);
+                emit(c, "    mov rsi, rax\n    mov rdi, fmt_d\n");
+            } else if (n->left && n->left->type == ARRAY_ACCESS_NODE) {
+                // Handle array access: println(arr[i])
                 compile_expr(c, n->left);
                 emit(c, "    mov rsi, rax\n    mov rdi, fmt_d\n");
             } else if (n->left && n->left->type == IDENTIFIER_NODE && !is_var_str(c, n->left->value)) {
@@ -558,6 +650,11 @@ static void compile_call(Compiler* c, ASTNode* n) {
                 encode_mov_rax_imm32(c->mc, atoi(n->left->value));
                 encode_mov_rsi_rax(c->mc);
             } else if (n->left && n->left->type == BINARY_OP_NODE) {
+                compile_expr(c, n->left);
+                encode_mov_rsi_rax(c->mc);
+                encode_mov_rdi_imm64(c->mc, 0);
+            } else if (n->left && n->left->type == ARRAY_ACCESS_NODE) {
+                // Handle array access: println(arr[i])
                 compile_expr(c, n->left);
                 encode_mov_rsi_rax(c->mc);
                 encode_mov_rdi_imm64(c->mc, 0);
@@ -638,25 +735,99 @@ static void compile_var(Compiler* c, ASTNode* n, int spanish) {
     add_var(c, n->value, is_str);
 }
 
+// === ARRAY DECLARATION ===
+static void compile_array_decl(Compiler* c, ASTNode* n) {
+    if (!n || !n->value) return;
+
+    // Get array size from extra node
+    int arr_size = 10;  // default size
+    if (n->extra && n->extra->type == NUMBER_NODE && n->extra->value) {
+        arr_size = atoi(n->extra->value);
+    }
+
+    // First register the array variable (allocates stack space)
+    add_array_var(c, n->value, arr_size);
+
+    if (c->mode == OUT_C) {
+        indent(c);
+        emit(c, "int %s[%d];\n", n->value, arr_size);
+    }
+    else if (c->mode == OUT_ASM) {
+        emit(c, "    ; array %s[%d]\n", n->value, arr_size);
+        // Arrays are stored on stack, space already allocated by add_array_var
+    }
+    else if (c->mc) {
+        // Arrays are stored on stack, space already allocated by add_array_var
+        // Initialize to zero
+        int base_off = get_var_off(c, n->value);
+        for (int i = 0; i < arr_size; i++) {
+            encode_mov_rax_imm32(c->mc, 0);
+            encode_mov_memory_from_rax(c->mc, base_off + i * 8);
+        }
+    }
+}
+
 // === ASSIGNMENT ===
 static void compile_assign(Compiler* c, ASTNode* n) {
     if (!n || !n->value || !n->left) return;
-    
-    if (c->mode == OUT_C) {
-        indent(c);
-        emit(c, "%s = ", n->value);
-        compile_expr(c, n->left);
-        emit(c, ";\n");
+
+    // Check if this is an array assignment (n->extra contains index)
+    if (n->extra) {
+        // Array assignment: arr[index] = value
+        if (c->mode == OUT_C) {
+            indent(c);
+            emit(c, "%s[", n->value);
+            compile_expr(c, n->extra);  // index
+            emit(c, "] = ");
+            compile_expr(c, n->left);   // value
+            emit(c, ";\n");
+        }
+        else if (c->mode == OUT_ASM) {
+            int base_off = get_var_off(c, n->value);
+            // Compute value and save to rbx
+            compile_expr(c, n->left);
+            emit(c, "    push rax\n");  // save value
+            // Compute index
+            compile_expr(c, n->extra);
+            emit(c, "    imul rax, 8\n");  // index * 8
+            emit(c, "    lea rbx, [rbp%+d]\n", base_off);
+            emit(c, "    add rax, rbx\n");  // base + index*8
+            emit(c, "    pop rbx\n");  // restore value to rbx
+            emit(c, "    mov [rax], rbx\n");  // store value
+        }
+        else if (c->mc) {
+            int base_off = get_var_off(c, n->value);
+            // Compute value and save to stack
+            compile_expr(c, n->left);
+            encode_push_rax(c->mc);     // save value
+            // Compute index
+            compile_expr(c, n->extra);
+            encode_mov_rbx_rax(c->mc);  // rbx = index
+            encode_imul_rbx_8(c->mc);   // rbx = index * 8
+            encode_lea_rax_rbp_off(c->mc, base_off);  // rax = base address
+            encode_add_rax_rbx(c->mc);  // rax = base + index*8
+            encode_pop_rbx(c->mc);      // rbx = value to store
+            encode_mov_ptr_rax_rbx(c->mc);  // [rax] = rbx (store value)
+        }
     }
-    else if (c->mode == OUT_ASM) {
-        int off = get_var_off(c, n->value);
-        compile_expr(c, n->left);
-        emit(c, "    mov [rbp%+d], rax\n", off);
-    }
-    else if (c->mc) {
-        int off = get_var_off(c, n->value);
-        compile_expr(c, n->left);
-        encode_mov_memory_from_rax(c->mc, off);
+    else {
+        // Regular variable assignment
+        if (c->mode == OUT_C) {
+            indent(c);
+            emit(c, "%s = ", n->value);
+            compile_expr(c, n->left);
+            emit(c, ";\n");
+        }
+        else if (c->mode == OUT_ASM) {
+            int off = get_var_off(c, n->value);
+            compile_expr(c, n->left);
+            emit(c, "    mov [rbp%+d], rax\n", off);
+        }
+        else if (c->mc) {
+            int off = get_var_off(c, n->value);
+            compile_expr(c, n->left);
+            encode_mov_memory_from_rax(c->mc, off);
+        }
     }
 }
 
@@ -848,6 +1019,9 @@ static void compile_func(Compiler* c, ASTNode* n) {
     // Register function
     int func_idx = add_func(c, name, param_count);
 
+    // Function body is in n->extra (n->right is for statement linking)
+    ASTNode* body = n->extra;
+
     if (c->mode == OUT_C) {
         // Generate C function with parameters
         emit(c, "int %s(", name);
@@ -871,7 +1045,7 @@ static void compile_func(Compiler* c, ASTNode* n) {
             param = param->right;
         }
 
-        compile_node(c, n->right);
+        compile_node(c, body);
         c->indent--;
         emit(c, "    return 0;\n}\n\n");
     }
@@ -890,7 +1064,7 @@ static void compile_func(Compiler* c, ASTNode* n) {
             param = param->right;
         }
 
-        compile_node(c, n->right);
+        compile_node(c, body);
         emit(c, "    xor rax,rax\n    leave\n    ret\n\n");
     }
     else if (c->mc) {
@@ -920,7 +1094,7 @@ static void compile_func(Compiler* c, ASTNode* n) {
             param = param->right;
         }
 
-        compile_node(c, n->right);
+        compile_node(c, body);
         encode_xor_rax_rax(c->mc);
         encode_leave(c->mc);
         encode_ret(c->mc);
@@ -941,12 +1115,13 @@ static void compile_node(Compiler* c, ASTNode* n) {
             case FN_DECL_NODE: case FN_DECL_SPANISH_NODE: compile_func(c, n); break;
             case VAR_DECL_NODE: compile_var(c, n, 0); break;
             case VAR_DECL_SPANISH_NODE: compile_var(c, n, 1); break;
+            case ARRAY_DECL_NODE: compile_array_decl(c, n); break;
             case ASSIGN_NODE: compile_assign(c, n); break;
             case IF_NODE: case IF_SPANISH_NODE: compile_if(c, n); break;
             case WHILE_NODE: case WHILE_SPANISH_NODE: compile_while(c, n); break;
             case FOR_NODE: case FOR_SPANISH_NODE: compile_for(c, n); break;
             case RETURN_NODE: compile_return(c, n); break;
-            case BREAK_NODE: 
+            case BREAK_NODE:
                 if (c->mode == OUT_C) { indent(c); emit(c, "break;\n"); }
                 break;
             case CONTINUE_NODE:
@@ -958,28 +1133,75 @@ static void compile_node(Compiler* c, ASTNode* n) {
     }
 }
 
+// === Helper: compile only function declarations from AST ===
+static void compile_functions_only(Compiler* c, ASTNode* n) {
+    while (n) {
+        if (n->type == FN_DECL_NODE || n->type == FN_DECL_SPANISH_NODE) {
+            compile_func(c, n);
+        }
+        n = n->right;
+    }
+}
+
+// === Helper: compile non-function statements from AST ===
+static void compile_statements_only(Compiler* c, ASTNode* n) {
+    while (n) {
+        if (n->type != FN_DECL_NODE && n->type != FN_DECL_SPANISH_NODE) {
+            switch (n->type) {
+                case PROGRAM_NODE: compile_statements_only(c, n->left); break;
+                case FN_CALL_NODE: compile_call(c, n); break;
+                case VAR_DECL_NODE: compile_var(c, n, 0); break;
+                case VAR_DECL_SPANISH_NODE: compile_var(c, n, 1); break;
+                case ARRAY_DECL_NODE: compile_array_decl(c, n); break;
+                case ASSIGN_NODE: compile_assign(c, n); break;
+                case IF_NODE: case IF_SPANISH_NODE: compile_if(c, n); break;
+                case WHILE_NODE: case WHILE_SPANISH_NODE: compile_while(c, n); break;
+                case FOR_NODE: case FOR_SPANISH_NODE: compile_for(c, n); break;
+                case RETURN_NODE: compile_return(c, n); break;
+                case BREAK_NODE:
+                    if (c->mode == OUT_C) { indent(c); emit(c, "break;\n"); }
+                    break;
+                case CONTINUE_NODE:
+                    if (c->mode == OUT_C) { indent(c); emit(c, "continue;\n"); }
+                    break;
+                default: break;
+            }
+        }
+        n = n->right;
+    }
+}
+
 // === MAIN WRAPPER ===
 static void compile_main(Compiler* c, ASTNode* ast) {
     if (c->mode == OUT_C) {
+        // First pass: compile function declarations outside main
+        ASTNode* prog = ast;
+        if (prog && prog->type == PROGRAM_NODE) {
+            compile_functions_only(c, prog->left);
+        }
+
+        // Now emit main and compile statements
         emit(c, "int main() {\n");
         c->indent = 1;
-    } else if (c->mode == OUT_ASM) {
-        // Strings written later
-    } else if (c->mc) {
-        encode_push_rbp(c->mc);
-        encode_mov_rbp_rsp(c->mc);
-        encode_sub_rsp_imm8(c->mc, 128);
-    }
-    
-    compile_node(c, ast);
-    
-    if (c->mode == OUT_C) {
+
+        if (prog && prog->type == PROGRAM_NODE) {
+            compile_statements_only(c, prog->left);
+        } else {
+            compile_statements_only(c, ast);
+        }
+
         emit(c, "    return 0;\n}\n");
     } else if (c->mode == OUT_ASM) {
+        // Strings written later
+        compile_node(c, ast);
         emit(c, "main:\n    push rbp\n    mov rbp,rsp\n    sub rsp,256\n");
         // Code already in buffer, append ending
         emit(c, "    xor rax,rax\n    leave\n    ret\n");
     } else if (c->mc) {
+        encode_push_rbp(c->mc);
+        encode_mov_rbp_rsp(c->mc);
+        encode_sub_rsp_imm8(c->mc, 128);
+        compile_node(c, ast);
         encode_xor_rax_rax(c->mc);
         encode_leave(c->mc);
         encode_ret(c->mc);
