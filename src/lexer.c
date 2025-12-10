@@ -98,6 +98,8 @@ TokenStream* tokenize(const char* source) {
             else if (strcmp(buffer, "for") == 0 || strcmp(buffer, "para") == 0) type = PARA;
             else if (strcmp(buffer, "not") == 0 || strcmp(buffer, "no") == 0) type = NO; // Spanish "not"
             else if (strcmp(buffer, "return") == 0 || strcmp(buffer, "retorno") == 0) type = RETORNO;
+            else if (strcmp(buffer, "break") == 0 || strcmp(buffer, "romper") == 0) type = ROMPER;
+            else if (strcmp(buffer, "continue") == 0 || strcmp(buffer, "continuar") == 0) type = CONTINUAR;
 
             add_token(stream, init_token(type, buffer, line));
         }
