@@ -208,9 +208,90 @@ The progression toward a fully bootstrapped Viva compiler:
 5. **Phase 11**: Write Viva compiler in Viva
 6. **Final Goal**: Viva compiler (written in Viva) that generates direct machine code - achieving true bootstrapping
 
-## Next Critical Steps
-1. Add integer-to-string conversion for standalone print (current limitation)
-2. Begin writing Viva lexer in Viva itself using the new array and struct features
-3. Create a simple token structure using `estructura`
-4. Implement character-by-character parsing with arrays
-5. Test self-compilation capability with simple Viva programs
+## Phase 9: Bootstrap Foundation (IN PROGRESS)
+### Objectives:
+- Add language features required for self-hosting compiler
+- Create project structure for bootstrap development
+- Prove bootstrap capability with working lexer in Viva
+
+### Completed Tasks:
+- ✅ `funcion` keyword for Spanish function declarations
+- ✅ `ord()` function - character to ASCII code (via array access str[i])
+- ✅ `chr(n)` function - ASCII code to character
+- ✅ `itoa(n)` function - integer to string conversion
+- ✅ `escribir_byte(f, byte)` - byte-level file I/O
+- ✅ Proper type inference for chr() (char) and itoa() (char*)
+- ✅ Project reorganization:
+  - `compiler/` - C-based Viva compiler
+  - `bootstrap/` - Viva source for self-hosting compiler
+  - `stdlib/` - Standard library (future)
+- ✅ Mini lexer proof-of-concept (bootstrap/lexer.viva)
+  - Tokenizes simple Viva code
+  - Uses character access, functions, loops
+  - Compiles to working C code
+
+### Known Issues to Fix:
+- ⚠️ `&&` in while conditions doesn't work correctly
+- ⚠️ `sino si` (else if) not chaining properly
+- ⚠️ String concatenation not yet implemented
+
+### Status: IN PROGRESS
+
+## Future Phases
+
+### Phase 10: Complete Bootstrap Lexer
+- Full tokenization of all Viva keywords and operators
+- Token structure using `estructura`
+- Error reporting with line numbers
+- String literal handling
+
+### Phase 11: Bootstrap Parser
+- AST node structures in Viva
+- Recursive descent parser
+- Expression parsing with precedence
+- Statement and declaration parsing
+
+### Phase 12: Bootstrap Code Generator
+- C code generation from Viva AST
+- Self-compilation: compile bootstrap compiler with itself
+- Verify output matches original compiler
+
+### Phase 13: Native Code Bootstrap
+- Machine code generation in Viva
+- ELF file generation in Viva
+- Full self-hosting without C dependency
+
+## Brainstorm: Future Directions
+
+### Language Enhancements
+- String concatenation (`+` or `concatenar`)
+- String comparison (`==` for strings)
+- Multi-line strings
+- Character literals (`'a'`)
+- Escape sequences in strings (`\n`, `\t`)
+- Constants (`constante` keyword)
+- Enums (`enumeracion`)
+
+### Standard Library (stdlib/)
+- String manipulation (substr, find, replace)
+- Math functions (sin, cos, tan, log)
+- File path utilities
+- Command-line argument parsing
+- Environment variables
+
+### Tooling
+- REPL (interactive mode)
+- Debugger support
+- Syntax highlighting definitions
+- Language server (LSP)
+- Package manager
+
+### Platform Support
+- ARM64 machine code (Apple Silicon, Raspberry Pi)
+- WebAssembly target
+- Embedded systems support
+
+### Colombian Cultural Features
+- More historical figures
+- Regional dialects support
+- Educational mode with Spanish explanations
