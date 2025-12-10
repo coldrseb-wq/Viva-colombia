@@ -271,6 +271,21 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             }
         }
     }
+    else if (n->type == ARRAY_ACCESS_NODE) {
+        // Array access: arr[index]
+        if (c->mode == OUT_C) {
+            emit(c, "%s[", n->value);
+            compile_expr(c, n->left);
+            emit(c, "]");
+        }
+        else if (c->mode == OUT_ASM) {
+            // TODO: implement array access in assembly
+            emit(c, "    ; array access %s[...]\n", n->value);
+        }
+        else if (c->mc) {
+            // TODO: implement array access in machine code
+        }
+    }
     else if (n->type == BINARY_OP_NODE) {
         if (c->mode == OUT_C) {
             emit(c, "(");
@@ -421,6 +436,18 @@ static void compile_call(Compiler* c, ASTNode* n) {
                 compile_expr(c, n->left);
                 emit(c, ");\n");
             }
+            else if (n->left && n->left->type == ARRAY_ACCESS_NODE) {
+                // Array access returns a number
+                emit(c, "prt%snum(", ln?"ln":"");
+                compile_expr(c, n->left);
+                emit(c, ");\n");
+            }
+            else if (n->left && n->left->type == FN_CALL_NODE) {
+                // Function call returns a number
+                emit(c, "prt%snum(", ln?"ln":"");
+                compile_expr(c, n->left);
+                emit(c, ");\n");
+            }
             else emit(c, "prt%s(\"\");\n", ln?"ln":"");
         }
         else if (strstr(fn,"bolivar")) emit(c, "bolivar();\n");
@@ -547,23 +574,45 @@ static void compile_var(Compiler* c, ASTNode* n, int spanish) {
 
 // === ASSIGNMENT ===
 static void compile_assign(Compiler* c, ASTNode* n) {
-    if (!n || !n->value || !n->left) return;
-    
-    if (c->mode == OUT_C) {
-        indent(c);
-        emit(c, "%s = ", n->value);
-        compile_expr(c, n->left);
-        emit(c, ";\n");
+    if (!n || !n->value) return;
+
+    // Check for array assignment: arr[index] = value
+    // In this case, n->left is ARRAY_ACCESS_NODE and n->extra is the value
+    if (n->left && n->left->type == ARRAY_ACCESS_NODE && n->extra) {
+        if (c->mode == OUT_C) {
+            indent(c);
+            emit(c, "%s[", n->value);
+            compile_expr(c, n->left->left);  // index
+            emit(c, "] = ");
+            compile_expr(c, n->extra);  // value
+            emit(c, ";\n");
+        }
+        else if (c->mode == OUT_ASM) {
+            // TODO: implement array assignment in assembly
+            emit(c, "    ; array assign %s[...] = ...\n", n->value);
+        }
+        else if (c->mc) {
+            // TODO: implement array assignment in machine code
+        }
     }
-    else if (c->mode == OUT_ASM) {
-        int off = get_var_off(c, n->value);
-        compile_expr(c, n->left);
-        emit(c, "    mov [rbp%+d], rax\n", off);
-    }
-    else if (c->mc) {
-        int off = get_var_off(c, n->value);
-        compile_expr(c, n->left);
-        encode_mov_memory_from_rax(c->mc, off);
+    // Simple variable assignment: var = value
+    else if (n->left) {
+        if (c->mode == OUT_C) {
+            indent(c);
+            emit(c, "%s = ", n->value);
+            compile_expr(c, n->left);
+            emit(c, ";\n");
+        }
+        else if (c->mode == OUT_ASM) {
+            int off = get_var_off(c, n->value);
+            compile_expr(c, n->left);
+            emit(c, "    mov [rbp%+d], rax\n", off);
+        }
+        else if (c->mc) {
+            int off = get_var_off(c, n->value);
+            compile_expr(c, n->left);
+            encode_mov_memory_from_rax(c->mc, off);
+        }
     }
 }
 
@@ -818,6 +867,15 @@ static void compile_node_ex(Compiler* c, ASTNode* n, int skip_funcs) {
                 break;
             case VAR_DECL_NODE: compile_var(c, n, 0); break;
             case VAR_DECL_SPANISH_NODE: compile_var(c, n, 1); break;
+            case ARRAY_DECL_NODE:
+                // Array declaration: int arr[size];
+                if (c->mode == OUT_C) {
+                    indent(c);
+                    emit(c, "int %s[", n->value);
+                    if (n->left) compile_expr(c, n->left);
+                    emit(c, "];\n");
+                }
+                break;
             case ASSIGN_NODE: compile_assign(c, n); break;
             case IF_NODE: case IF_SPANISH_NODE: compile_if(c, n); break;
             case WHILE_NODE: case WHILE_SPANISH_NODE: compile_while(c, n); break;

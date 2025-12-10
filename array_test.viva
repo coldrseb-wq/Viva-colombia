@@ -1,0 +1,33 @@
+// Test array support
+println("=== Array Test ===");
+
+// Test array declaration and assignment
+decreto arr[5];
+arr[0] = 10;
+arr[1] = 20;
+arr[2] = 30;
+
+println("arr[0]:");
+println(arr[0]);
+println("arr[1]:");
+println(arr[1]);
+println("arr[2]:");
+println(arr[2]);
+
+// Test array access in expressions
+decreto sum = arr[0] + arr[1] + arr[2];
+println("Sum:");
+println(sum);
+
+// Test array with for loop
+decreto nums[10];
+para (decreto i = 0; i < 5; i = i + 1) {
+    nums[i] = i * 2;
+}
+
+println("nums[0]:");
+println(nums[0]);
+println("nums[4]:");
+println(nums[4]);
+
+println("=== Array Test Complete ===");

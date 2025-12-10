@@ -151,17 +151,14 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
                 (*pos)++; // skip semicolon
             }
         } else {
-            node = init_ast_node(IDENTIFIER_NODE);
-            node->value = strdup(current_token->value);
+            char* id_name = strdup(current_token->value);
             (*pos)++;
 
             // Check for array access: identifier[expression]
             if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACKET) {
-                // Transform from IDENTIFIER_NODE to ARRAY_ACCESS_NODE
-                char* array_name = strdup(node->value);
-                free_ast_node(node); // Free the temporary identifier node
+                // Create ARRAY_ACCESS_NODE
                 node = init_ast_node(ARRAY_ACCESS_NODE);
-                node->value = array_name;
+                node->value = id_name;
 
                 (*pos)++; // skip '['
 
@@ -175,6 +172,10 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
                     // Error: expected closing bracket
                     fprintf(stderr, "Error: Expected ']' at line %d\n", current_token->line);
                 }
+            } else {
+                // Regular identifier
+                node = init_ast_node(IDENTIFIER_NODE);
+                node->value = id_name;
             }
 
             // Check and consume semicolon if present after identifier/array access (in case of variable usage without assignment)
@@ -294,6 +295,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
 
     if (current_token->type == LET || current_token->type == DECRETO) {
         // Handle variable declaration with assignment: decreto var = value;
+        // Or array declaration: decreto arr[size];
         (*pos)++; // skip 'let' or 'decreto'
 
         // Expect an identifier (variable name)
@@ -301,8 +303,30 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
             char* var_name = strdup(tokens->tokens[*pos]->value);
             (*pos)++; // skip identifier
 
+            // Check for array declaration: decreto arr[size]
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACKET) {
+                (*pos)++; // skip '['
+
+                // Parse array size
+                ASTNode* size_expr = parse_expression(tokens, pos);
+
+                // Expect closing ']'
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACKET) {
+                    (*pos)++; // skip ']'
+                }
+
+                // Create array declaration node
+                node = init_ast_node(ARRAY_DECL_NODE);
+                node->value = var_name;  // array name
+                node->left = size_expr;  // array size
+
+                // Check and consume semicolon if present
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                    (*pos)++; // skip semicolon
+                }
+            }
             // Expect assignment operator
-            if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+            else if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
                 (*pos)++; // skip assignment operator
 
                 // Parse the expression to be assigned
@@ -329,7 +353,6 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                     node = init_ast_node(VAR_DECL_NODE);
                 }
                 node->value = var_name;
-                free(var_name);
 
                 // Check and consume semicolon if present
                 if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
@@ -801,8 +824,10 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
         return node;
     } else if (current_token->type == IDENTIFIER) {
         // Handle assignment statements: identifier = expression;
+        // Or array assignment: identifier[index] = expression;
         int next_pos = *pos + 1;
         if (next_pos < tokens->count && tokens->tokens[next_pos]->type == ASSIGN) {
+            // Simple variable assignment: x = value
             char* var_name = strdup(tokens->tokens[*pos]->value);
             (*pos) += 2; // skip identifier and assignment operator
 
@@ -817,6 +842,49 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                 (*pos)++; // skip semicolon
             }
             return node;
+        } else if (next_pos < tokens->count && tokens->tokens[next_pos]->type == LBRACKET) {
+            // Array assignment: arr[index] = value
+            char* arr_name = strdup(tokens->tokens[*pos]->value);
+            (*pos)++; // skip identifier
+            (*pos)++; // skip '['
+
+            // Parse the index expression
+            ASTNode* index_expr = parse_expression(tokens, pos);
+
+            // Expect closing ']'
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACKET) {
+                (*pos)++; // skip ']'
+            }
+
+            // Check for assignment operator
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+                (*pos)++; // skip '='
+
+                // Parse the value expression
+                ASTNode* value_expr = parse_expression(tokens, pos);
+
+                // Create ASSIGN_NODE with ARRAY_ACCESS_NODE as left side
+                node = init_ast_node(ASSIGN_NODE);
+                node->value = arr_name;  // array name
+
+                // Create array access node to store array name and index
+                ASTNode* arr_access = init_ast_node(ARRAY_ACCESS_NODE);
+                arr_access->value = strdup(arr_name);
+                arr_access->left = index_expr;
+                node->left = arr_access;  // left side is array access
+                node->extra = value_expr; // value (use extra, not right, since right is for statement linking)
+
+                // Check and consume semicolon if present
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                    (*pos)++; // skip semicolon
+                }
+                return node;
+            } else {
+                // Not an assignment, need to handle as expression (shouldn't happen often)
+                free(arr_name);
+                // Rewind and handle as expression
+                // For now, just return NULL
+            }
         } else {
             // If it's just an identifier without assignment, continue to expression parsing
             node = parse_expression(tokens, pos);
