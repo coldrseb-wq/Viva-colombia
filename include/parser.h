@@ -15,6 +15,7 @@ typedef enum {
     FN_CALL_NODE,
     IF_NODE,
     WHILE_NODE,
+    FOR_NODE,               // For English "for" loops
     ASSIGN_NODE,
     VAR_DECL_SPANISH_NODE,  // For "decreto" variable declarations
     FN_DECL_SPANISH_NODE,   // For "cancion" function declarations
@@ -33,8 +34,10 @@ typedef enum {
 typedef struct ASTNode {
     NodeType type;
     char* value;
-    struct ASTNode* left;   // Left child
-    struct ASTNode* right;  // Right child or next statement
+    struct ASTNode* left;   // Left child (condition for if/while, params for fn, init for for)
+    struct ASTNode* right;  // Right child (body for if/while/for/fn)
+    struct ASTNode* extra;  // Extra node (else block for if, condition/increment for for)
+    struct ASTNode* next;   // Next statement in sequence (for statement chaining)
 } ASTNode;
 
 ASTNode* init_ast_node(NodeType type);

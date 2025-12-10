@@ -13,12 +13,20 @@
 #define MAX_STRS 100
 #define MAX_BUF 16384
 #define MAX_LABELS 256
+#define MAX_FUNCS 64
+#define MAX_PARAMS 8
 
 typedef enum { OUT_C, OUT_ASM, OUT_ELF } OutMode;
 
 typedef struct { char name[64]; int is_str; int offset; } Var;
 typedef struct { char val[256]; char lbl[32]; int offset; } Str;
 typedef struct { char name[32]; int offset; } Label;
+typedef struct {
+    char name[64];
+    int code_offset;      // Position in machine code
+    int param_count;
+    char params[MAX_PARAMS][64];
+} UserFunc;
 
 typedef struct {
     FILE* f;
@@ -38,12 +46,14 @@ typedef struct {
     ELFFile* elf;
     int stack_off;
     int data_size;
+    UserFunc funcs[MAX_FUNCS];
+    int nfunc;
+    int in_function;  // Track if we're inside a function
 } Compiler;
 
 // Forward declarations
 static void compile_node(Compiler* c, ASTNode* n);
 static void compile_expr(Compiler* c, ASTNode* n);
-static void compile_expr_to_rax(Compiler* c, ASTNode* n);
 
 // === EMIT HELPERS ===
 static void emit(Compiler* c, const char* fmt, ...) {
@@ -111,6 +121,33 @@ static int get_str_offset(Compiler* c, const char* lbl) {
     for (int i = 0; i < c->nstr; i++)
         if (strcmp(c->strs[i].lbl, lbl) == 0) return c->strs[i].offset;
     return 0;
+}
+
+// === FUNCTION MANAGEMENT ===
+static int find_func(Compiler* c, const char* name) {
+    for (int i = 0; i < c->nfunc; i++)
+        if (strcmp(c->funcs[i].name, name) == 0) return i;
+    return -1;
+}
+
+static int add_func(Compiler* c, const char* name, int code_off) {
+    if (c->nfunc >= MAX_FUNCS) return -1;
+    strncpy(c->funcs[c->nfunc].name, name, 63);
+    c->funcs[c->nfunc].code_offset = code_off;
+    c->funcs[c->nfunc].param_count = 0;
+    return c->nfunc++;
+}
+
+static void add_func_param(Compiler* c, int func_idx, const char* param_name) {
+    if (func_idx < 0 || func_idx >= c->nfunc) return;
+    UserFunc* f = &c->funcs[func_idx];
+    if (f->param_count >= MAX_PARAMS) return;
+    strncpy(f->params[f->param_count++], param_name, 63);
+}
+
+static UserFunc* get_func(Compiler* c, const char* name) {
+    int idx = find_func(c, name);
+    return (idx >= 0) ? &c->funcs[idx] : NULL;
 }
 
 // === COMPILER INIT/FINISH ===
@@ -205,10 +242,19 @@ static void finish_compiler(Compiler* c) {
     free(c);
 }
 
+// Forward declaration for compile_call (needed for expression)
+static void compile_call(Compiler* c, ASTNode* n);
+
 // === EXPRESSION COMPILATION ===
 static void compile_expr(Compiler* c, ASTNode* n) {
     if (!n) return;
-    
+
+    // Handle function call as expression (returns value in rax)
+    if (n->type == FN_CALL_NODE) {
+        compile_call(c, n);
+        return;
+    }
+
     if (n->type == NUMBER_NODE) {
         if (c->mode == OUT_C) emit(c, "%s", n->value);
         else if (c->mode == OUT_ASM) emit(c, "    mov rax, %s\n", n->value);
@@ -356,35 +402,51 @@ static void compile_expr(Compiler* c, ASTNode* n) {
 static void compile_call(Compiler* c, ASTNode* n) {
     if (!n || !n->value) return;
     const char* fn = n->value;
-    
+
+    // Check if this is a user-defined function
+    UserFunc* uf = get_func(c, fn);
+
     if (c->mode == OUT_C) {
-        indent(c);
+        // Note: indent is NOT called here - caller is responsible for indentation
+        // This allows function calls to be used both as statements and expressions
         if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
             int ln = (strcmp(fn,"println")==0);
             if (n->left && n->left->type == NUMBER_NODE)
-                emit(c, "prt%snum(%s);\n", ln?"ln":"", n->left->value);
-            else if (n->left && (n->left->type == STRING_LITERAL_NODE || 
+                emit(c, "prt%snum(%s)", ln?"ln":"", n->left->value);
+            else if (n->left && (n->left->type == STRING_LITERAL_NODE ||
                      (n->left->type == IDENTIFIER_NODE && n->left->value[0]=='"')))
-                emit(c, "prt%s(%s);\n", ln?"ln":"", n->left->value);
+                emit(c, "prt%s(%s)", ln?"ln":"", n->left->value);
             else if (n->left && n->left->type == IDENTIFIER_NODE) {
                 if (is_var_str(c, n->left->value))
-                    emit(c, "prt%s(%s);\n", ln?"ln":"", n->left->value);
+                    emit(c, "prt%s(%s)", ln?"ln":"", n->left->value);
                 else
-                    emit(c, "prt%snum(%s);\n", ln?"ln":"", n->left->value);
+                    emit(c, "prt%snum(%s)", ln?"ln":"", n->left->value);
             }
             else if (n->left && n->left->type == BINARY_OP_NODE) {
                 emit(c, "prt%snum(", ln?"ln":"");
                 compile_expr(c, n->left);
-                emit(c, ");\n");
+                emit(c, ")");
             }
-            else emit(c, "prt%s(\"\");\n", ln?"ln":"");
+            else emit(c, "prt%s(\"\")", ln?"ln":"");
         }
-        else if (strstr(fn,"bolivar")) emit(c, "bolivar();\n");
-        else if (strstr(fn,"narino")) emit(c, "narino();\n");
-        else if (strstr(fn,"cano")) emit(c, "cano();\n");
-        else if (strstr(fn,"gaitan")) emit(c, "gaitan();\n");
-        else if (strstr(fn,"garcia")) emit(c, "garcia();\n");
-        else emit(c, "%s();\n", fn);
+        else if (strstr(fn,"bolivar")) emit(c, "bolivar()");
+        else if (strstr(fn,"narino")) emit(c, "narino()");
+        else if (strstr(fn,"cano")) emit(c, "cano()");
+        else if (strstr(fn,"gaitan")) emit(c, "gaitan()");
+        else if (strstr(fn,"garcia")) emit(c, "garcia()");
+        else {
+            // User-defined function call with multiple arguments
+            emit(c, "%s(", fn);
+            ASTNode* arg = n->left;
+            int first = 1;
+            while (arg) {
+                if (!first) emit(c, ", ");
+                compile_expr(c, arg);
+                first = 0;
+                arg = arg->next;
+            }
+            emit(c, ")");
+        }
     }
     else if (c->mode == OUT_ASM) {
         emit(c, "    ; call %s\n", fn);
@@ -402,6 +464,19 @@ static void compile_call(Compiler* c, ASTNode* n) {
                 emit(c, "    mov rdi, fmt_s\n    lea rsi, [%s]\n", l);
             }
             emit(c, "    xor rax,rax\n    call printf\n");
+        }
+        else if (uf) {
+            // User-defined function: pass args in rdi, rsi, rdx, rcx, r8, r9
+            static const char* arg_regs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+            ASTNode* arg = n->left;
+            int arg_idx = 0;
+            while (arg && arg_idx < 6) {
+                compile_expr(c, arg);
+                emit(c, "    mov %s, rax\n", arg_regs[arg_idx]);
+                arg = arg->next;
+                arg_idx++;
+            }
+            emit(c, "    call %s\n", fn);
         }
         else {
             emit(c, "    call %s\n", fn);
@@ -426,6 +501,17 @@ static void compile_call(Compiler* c, ASTNode* n) {
             encode_xor_rax_rax(c->mc);
             add_relocation_entry(c->mc, 1, R_X86_64_PLT32, -4);
             encode_call_rel32(c->mc, 0);
+        } else if (uf) {
+            // User-defined function call
+            // Move argument to rdi (first arg register)
+            if (n->left) {
+                compile_expr(c, n->left);
+                encode_mov_rdi_rax(c->mc);
+            }
+            // Calculate relative offset and emit call
+            int call_pos = c->mc->size;
+            int32_t rel_offset = uf->code_offset - (call_pos + 5);  // +5 for call instruction size
+            encode_call_rel32(c->mc, rel_offset);
         } else {
             encode_call_external(c->mc);
         }
@@ -681,28 +767,114 @@ static void compile_return(Compiler* c, ASTNode* n) {
 // === FUNCTION DECLARATION ===
 static void compile_func(Compiler* c, ASTNode* n) {
     const char* name = n->value ? n->value : "func";
-    
+    ASTNode* param = n->left;  // Parameters are stored in left child
+
+    // Save old variable state for function scope
+    int old_nvar = c->nvar;
+    int old_stack_off = c->stack_off;
+    c->in_function = 1;
+
     if (c->mode == OUT_C) {
-        emit(c, "int %s() {\n", name);
+        emit(c, "int %s(", name);
+        // Emit parameters
+        param = n->left;
+        int first = 1;
+        while (param) {
+            if (!first) emit(c, ", ");
+            emit(c, "int %s", param->value);
+            first = 0;
+            param = param->right;
+        }
+        emit(c, ") {\n");
         c->indent++;
+
+        // Add parameters as variables
+        param = n->left;
+        while (param) {
+            add_var(c, param->value, 0);
+            param = param->right;
+        }
+
         compile_node(c, n->right);
         c->indent--;
         emit(c, "    return 0;\n}\n\n");
     }
     else if (c->mode == OUT_ASM) {
         emit(c, "%s:\n    push rbp\n    mov rbp,rsp\n    sub rsp,256\n", name);
+
+        // System V ABI: Save parameters from registers to stack
+        // rdi, rsi, rdx, rcx, r8, r9
+        const char* arg_regs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+        param = n->left;
+        int param_idx = 0;
+        while (param && param_idx < 6) {
+            int off = -(8 * (param_idx + 1));
+            emit(c, "    mov [rbp%+d], %s\n", off, arg_regs[param_idx]);
+            add_var(c, param->value, 0);
+            param_idx++;
+            param = param->right;
+        }
+
         compile_node(c, n->right);
         emit(c, "    xor rax,rax\n    leave\n    ret\n\n");
     }
     else if (c->mc) {
+        // Register function in the table
+        int func_idx = add_func(c, name, c->mc->size);
+
+        // Function prologue
         encode_push_rbp(c->mc);
         encode_mov_rbp_rsp(c->mc);
         encode_sub_rsp_imm8(c->mc, 128);
+
+        // System V ABI: Save parameters from registers to stack
+        // rdi=arg0, rsi=arg1, rdx=arg2, rcx=arg3
+        param = n->left;
+        int param_idx = 0;
+        while (param && param_idx < 6) {
+            int off = -(8 * (param_idx + 1));
+
+            // Move argument register to stack
+            // For first 4 args: rdi, rsi, rdx, rcx
+            if (param_idx == 0) {
+                // mov [rbp+off], rdi
+                uint8_t code[] = {0x48, 0x89, 0xBD};
+                append_bytes(c->mc, code, 3);
+                append_bytes(c->mc, (uint8_t*)&off, 4);
+            } else if (param_idx == 1) {
+                // mov [rbp+off], rsi
+                uint8_t code[] = {0x48, 0x89, 0xB5};
+                append_bytes(c->mc, code, 3);
+                append_bytes(c->mc, (uint8_t*)&off, 4);
+            } else if (param_idx == 2) {
+                // mov [rbp+off], rdx
+                uint8_t code[] = {0x48, 0x89, 0x95};
+                append_bytes(c->mc, code, 3);
+                append_bytes(c->mc, (uint8_t*)&off, 4);
+            } else if (param_idx == 3) {
+                // mov [rbp+off], rcx
+                uint8_t code[] = {0x48, 0x89, 0x8D};
+                append_bytes(c->mc, code, 3);
+                append_bytes(c->mc, (uint8_t*)&off, 4);
+            }
+            // r8 and r9 need REX.B prefix - add if needed for >4 params
+
+            add_var(c, param->value, 0);
+            add_func_param(c, func_idx, param->value);
+            param_idx++;
+            param = param->right;
+        }
+
         compile_node(c, n->right);
         encode_xor_rax_rax(c->mc);
         encode_leave(c->mc);
         encode_ret(c->mc);
     }
+
+    // Restore variable state (exit function scope)
+    c->nvar = old_nvar;
+    c->stack_off = old_stack_off;
+    c->in_function = 0;
 }
 
 // === NODE DISPATCHER ===
@@ -710,7 +882,12 @@ static void compile_node(Compiler* c, ASTNode* n) {
     while (n) {
         switch (n->type) {
             case PROGRAM_NODE: compile_node(c, n->left); break;
-            case FN_CALL_NODE: compile_call(c, n); break;
+            case FN_CALL_NODE:
+                if (c->mode == OUT_C) indent(c);  // Add indent for statement context
+                compile_call(c, n);
+                // Add semicolon for statement context in C mode
+                if (c->mode == OUT_C) emit(c, ";\n");
+                break;
             case FN_DECL_NODE: case FN_DECL_SPANISH_NODE: compile_func(c, n); break;
             case VAR_DECL_NODE: compile_var(c, n, 0); break;
             case VAR_DECL_SPANISH_NODE: compile_var(c, n, 1); break;
@@ -719,7 +896,7 @@ static void compile_node(Compiler* c, ASTNode* n) {
             case WHILE_NODE: case WHILE_SPANISH_NODE: compile_while(c, n); break;
             case FOR_NODE: case FOR_SPANISH_NODE: compile_for(c, n); break;
             case RETURN_NODE: compile_return(c, n); break;
-            case BREAK_NODE: 
+            case BREAK_NODE:
                 if (c->mode == OUT_C) { indent(c); emit(c, "break;\n"); }
                 break;
             case CONTINUE_NODE:
@@ -727,25 +904,71 @@ static void compile_node(Compiler* c, ASTNode* n) {
                 break;
             default: break;
         }
-        n = n->right;
+        n = n->next;  // Use next for statement chaining
+    }
+}
+
+// Helper to check if node is a function declaration
+static int is_func_decl(ASTNode* n) {
+    return n && (n->type == FN_DECL_NODE || n->type == FN_DECL_SPANISH_NODE);
+}
+
+// Compile functions first (before main)
+static void compile_functions(Compiler* c, ASTNode* ast) {
+    if (!ast) return;
+    if (ast->type == PROGRAM_NODE) {
+        ASTNode* n = ast->left;
+        while (n) {
+            if (is_func_decl(n)) {
+                compile_func(c, n);
+            }
+            n = n->next;  // Use next for statement chain
+        }
+    }
+}
+
+// Compile non-function statements (inside main)
+static void compile_statements(Compiler* c, ASTNode* ast) {
+    if (!ast) return;
+    if (ast->type == PROGRAM_NODE) {
+        ASTNode* n = ast->left;
+        while (n) {
+            if (!is_func_decl(n)) {
+                // Temporarily stop next-chain traversal since we're iterating manually
+                ASTNode* save_next = n->next;
+                n->next = NULL;
+                compile_node(c, n);
+                n->next = save_next;
+            }
+            n = n->next;  // Use next for statement chain
+        }
+    } else {
+        compile_node(c, ast);
     }
 }
 
 // === MAIN WRAPPER ===
 static void compile_main(Compiler* c, ASTNode* ast) {
+    // First pass: compile all function declarations
+    compile_functions(c, ast);
+
+    // Then wrap non-function statements in main
     if (c->mode == OUT_C) {
         emit(c, "int main() {\n");
         c->indent = 1;
     } else if (c->mode == OUT_ASM) {
         // Strings written later
     } else if (c->mc) {
+        // Register main function
+        add_func(c, "main", c->mc->size);
         encode_push_rbp(c->mc);
         encode_mov_rbp_rsp(c->mc);
         encode_sub_rsp_imm8(c->mc, 128);
     }
-    
-    compile_node(c, ast);
-    
+
+    // Compile non-function statements
+    compile_statements(c, ast);
+
     if (c->mode == OUT_C) {
         emit(c, "    return 0;\n}\n");
     } else if (c->mode == OUT_ASM) {

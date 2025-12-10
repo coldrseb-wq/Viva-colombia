@@ -11,6 +11,8 @@ ASTNode* init_ast_node(NodeType type) {
     node->type = type;
     node->left = NULL;
     node->right = NULL;
+    node->extra = NULL;
+    node->next = NULL;
     node->value = NULL;
     return node;
 }
@@ -27,10 +29,14 @@ void free_ast_node(ASTNode* node) {
             // to avoid accessing memory after it's freed
             ASTNode* left = node->left;
             ASTNode* right = node->right;
+            ASTNode* extra = node->extra;
+            ASTNode* next = node->next;
 
             // Set to NULL before recursively freeing to avoid issues with circular references
             node->left = NULL;
             node->right = NULL;
+            node->extra = NULL;
+            node->next = NULL;
 
             // Free the subtrees
             if (left != NULL) {
@@ -38,6 +44,12 @@ void free_ast_node(ASTNode* node) {
             }
             if (right != NULL) {
                 free_ast_node(right);
+            }
+            if (extra != NULL) {
+                free_ast_node(extra);
+            }
+            if (next != NULL) {
+                free_ast_node(next);
             }
 
             // Free value if exists
@@ -103,24 +115,32 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
             node->value = strdup(current_token->value);  // function name
             (*pos) += 2;  // skip identifier and left parenthesis
 
-            // Parse the first argument if it exists (for now, just handle single argument)
-            if (*pos < tokens->count && tokens->tokens[*pos]->type != RPAREN) {
-                node->left = parse_expression(tokens, pos);
+            // Parse arguments (supports multiple comma-separated arguments)
+            ASTNode* current_arg = NULL;
+            while (*pos < tokens->count && tokens->tokens[*pos]->type != RPAREN) {
+                ASTNode* arg = parse_expression(tokens, pos);
+                if (arg != NULL) {
+                    if (node->left == NULL) {
+                        node->left = arg;
+                        current_arg = arg;
+                    } else {
+                        current_arg->next = arg;
+                        current_arg = arg;
+                    }
+                }
+
+                // Skip comma if present
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == COMMA) {
+                    (*pos)++;
+                } else {
+                    break;  // No more arguments
+                }
             }
 
-            // Skip to the closing parenthesis
-            int paren_count = 1;
-            while (*pos < tokens->count && paren_count > 0) {
-                if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
-                    paren_count++;
-                } else if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
-                    paren_count--;
-                }
-                if (paren_count > 0) {
-                    (*pos)++;
-                }
+            // Skip closing parenthesis
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
             }
-            if (*pos < tokens->count) (*pos)++; // skip final RPAREN
 
             // Check and consume semicolon if present after function call
             if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
@@ -343,7 +363,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                                 then_body = stmt;
                                 current_stmt = stmt;
                             } else {
-                                current_stmt->right = stmt;
+                                current_stmt->next = stmt;
                                 current_stmt = stmt;
                             }
                         } else if (*pos == original_pos) {
@@ -389,7 +409,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                                         else_body = stmt;
                                         current_stmt = stmt;
                                     } else {
-                                        current_stmt->right = stmt;
+                                        current_stmt->next = stmt;
                                         current_stmt = stmt;
                                     }
                                 } else if (*pos == original_pos) {
@@ -404,14 +424,8 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                                 (*pos)++; // skip '}'
                             }
 
-                            // For if-else, we need a way to store both then and else blocks
-                            // We'll create a special structure where:
-                            // node->right (already set to then_body) gets replaced with a new node
-                            // This new node has left=then_body, right=else_body
-                            ASTNode* then_else_node = init_ast_node(IF_SPANISH_NODE); // Reusing type for internal structure
-                            then_else_node->left = then_body;  // then block
-                            then_else_node->right = else_body;  // else block
-                            node->right = then_else_node;      // Update the original node
+                            // Store the else block in the extra field
+                            node->extra = else_body;
                         }
                     }
                 } else {
@@ -454,7 +468,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                                 loop_body = stmt;
                                 current_stmt = stmt;
                             } else {
-                                current_stmt->right = stmt;
+                                current_stmt->next = stmt;
                                 current_stmt = stmt;
                             }
                         } else if (*pos == original_pos) {
@@ -542,7 +556,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                                 loop_body = stmt;
                                 current_stmt = stmt;
                             } else {
-                                current_stmt->right = stmt;
+                                current_stmt->next = stmt;
                                 current_stmt = stmt;
                             }
                         } else if (*pos == original_pos) {
@@ -557,22 +571,20 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                         (*pos)++; // skip '}'
                     }
 
-                    // Create a special structure for the for loop:
-                    // node->left = init_condition_increment (linked list of 3 expressions)
-                    // node->right = loop_body
+                    // Create a for loop node using:
+                    // left = init expression
+                    // right = loop body
+                    // extra = node where extra->left = condition, extra->right = increment
                     ASTNode* for_node = init_ast_node(FOR_SPANISH_NODE);
 
-                    // Create a chain of the three expressions: init -> condition -> increment
-                    ASTNode* init_chain = init_expr;
-                    if (init_expr) {
-                        init_expr->right = condition_expr;
-                        if (condition_expr) {
-                            condition_expr->right = increment_expr;
-                        }
-                    }
+                    for_node->left = init_expr;        // initialization
+                    for_node->right = loop_body;       // loop body
 
-                    for_node->left = init_chain;  // init; condition; increment
-                    for_node->right = loop_body;  // loop body
+                    // Store condition and increment in extra node
+                    ASTNode* cond_incr = init_ast_node(EXPRESSION_NODE);
+                    cond_incr->left = condition_expr;   // condition
+                    cond_incr->right = increment_expr;  // increment
+                    for_node->extra = cond_incr;
 
                     return for_node;
                 }
@@ -664,7 +676,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                             func_body = stmt;
                             current_stmt = stmt;
                         } else {
-                            current_stmt->right = stmt;
+                            current_stmt->next = stmt;
                             current_stmt = stmt;
                         }
                     }
@@ -771,7 +783,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
 ASTNode* parse_program(TokenStream* tokens) {
     ASTNode* root = init_ast_node(PROGRAM_NODE);
     ASTNode* current = NULL;
-    
+
     int pos = 0;
     while (pos < tokens->count) {
         int original_pos = pos;  // Track original position
@@ -781,8 +793,8 @@ ASTNode* parse_program(TokenStream* tokens) {
                 root->left = stmt; // First statement
                 current = stmt;
             } else {
-                // Link statements together
-                current->right = stmt;
+                // Link statements using next pointer to avoid overwriting right
+                current->next = stmt;
                 current = stmt;
             }
         } else if (pos == original_pos) {

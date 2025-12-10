@@ -1,0 +1,6 @@
+fn add(a, b) {
+    retorno a + b;
+}
+
+decreto result = add(5, 3);
+println(result);

@@ -75,9 +75,6 @@ void print_ast(ASTNode* node, int depth) {
         case CONDITION_NODE:
             printf("CONDITION\n");
             break;
-        case ELSE_NODE:
-            printf("ELSE\n");
-            break;
         default:
             printf("UNKNOWN NODE TYPE: %d\n", node->type);
             break;
@@ -91,6 +88,9 @@ void print_ast(ASTNode* node, int depth) {
     }
     if (node->extra) {
         print_ast(node->extra, depth + 1);
+    }
+    if (node->next) {
+        print_ast(node->next, depth);  // Same depth for siblings
     }
 }
 
@@ -119,6 +119,15 @@ static char* remove_quotes(const char* str) {
     return clean;
 }
 
+// Helper function to interpret a block of statements (traverses next chain)
+static void interpret_block(ASTNode* node, SymbolTable* symbol_table) {
+    ASTNode* current = node;
+    while (current != NULL) {
+        interpret_ast(current, symbol_table);
+        current = current->next;
+    }
+}
+
 int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
     if (node == NULL) return 0;
 
@@ -127,7 +136,7 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
             ASTNode* current = node->left;
             while (current != NULL) {
                 interpret_ast(current, symbol_table);
-                current = current->right;
+                current = current->next;  // Use next for statement chain
             }
             break;
         }
@@ -296,9 +305,9 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
         case IF_NODE: {
             int condition = interpret_ast(node->left, symbol_table);
             if (condition) {
-                interpret_ast(node->right, symbol_table);
+                interpret_block(node->right, symbol_table);
             } else if (node->extra) {
-                interpret_ast(node->extra, symbol_table);
+                interpret_block(node->extra, symbol_table);
             }
             break;
         }
@@ -306,7 +315,7 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
         case WHILE_SPANISH_NODE:
         case WHILE_NODE: {
             while (interpret_ast(node->left, symbol_table)) {
-                interpret_ast(node->right, symbol_table);
+                interpret_block(node->right, symbol_table);
             }
             break;
         }
@@ -316,22 +325,22 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
             if (node->left) {
                 interpret_ast(node->left, symbol_table);
             }
-            
+
             if (node->extra) {
                 ASTNode* condition_node = node->extra->left;
                 ASTNode* increment_node = node->extra->right;
-                
+
                 while (condition_node == NULL || interpret_ast(condition_node, symbol_table)) {
-                    interpret_ast(node->right, symbol_table);
-                    
+                    interpret_block(node->right, symbol_table);
+
                     if (increment_node) {
                         interpret_ast(increment_node, symbol_table);
                     }
-                    
+
                     if (condition_node == NULL) break;
                 }
             } else {
-                interpret_ast(node->right, symbol_table);
+                interpret_block(node->right, symbol_table);
             }
             break;
         }
@@ -373,13 +382,6 @@ int interpret_ast(ASTNode* node, SymbolTable* symbol_table) {
                 return interpret_ast(node->left, symbol_table);
             }
             return 0;
-        }
-
-        case ELSE_NODE: {
-            if (node->left) {
-                interpret_ast(node->left, symbol_table);
-            }
-            break;
         }
 
         case STRING_LITERAL_NODE: {
