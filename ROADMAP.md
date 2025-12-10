@@ -114,10 +114,10 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 
 ### Priority 1: Core Language Features
 #### Function System (Critical)
-- [ ] **Function parameters in codegen** - `compile_func()` currently ignores parameter list (`n->left`)
-- [ ] **User function calls with arguments** - Only builtins work, need to pass args to user functions
-- [ ] **Local variable scoping** - Proper stack frames per function
-- [ ] **Recursive function support** - Call stack management
+- [x] **Function parameters in codegen** - Parameters stored to stack from rdi, rsi, rdx, rcx
+- [x] **User function calls with arguments** - Evaluates args and passes in registers
+- [x] **Local variable scoping** - Function-local variable tables with save/restore
+- [ ] **Recursive function support** - Call stack management (basic support exists)
 
 #### Data Structures (Critical)
 - [ ] **Arrays with indexing** - Parser exists (`parser.c:135`), needs codegen
@@ -137,12 +137,12 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 
 ### Priority 2: Low-Level System Access
 #### Raw Syscalls (Remove libc dependency)
-- [ ] **Wire up syscall instruction** - `encode_syscall()` exists in `machine_code.c:426` but unused!
-- [ ] **write() syscall** - Replace printf with `syscall(1, fd, buf, len)`
+- [x] **Wire up syscall instruction** - `encode_syscall()` now used in compiler!
+- [x] **write() syscall** - `syscall_write()` builtin (simplified version)
 - [ ] **read() syscall** - File input `syscall(0, fd, buf, len)`
 - [ ] **open() syscall** - File handling `syscall(2, path, flags, mode)`
 - [ ] **close() syscall** - `syscall(3, fd)`
-- [ ] **exit() syscall** - `syscall(60, code)`
+- [x] **exit() syscall** - `syscall_exit(code)` builtin working
 
 #### Memory Management
 - [ ] **mmap() syscall** - Heap allocation `syscall(9, addr, len, prot, flags, fd, off)`
@@ -151,14 +151,19 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 
 ### Priority 3: Additional Operators
 #### Bitwise Operators
-- [ ] **Bitwise AND** - `&`
-- [ ] **Bitwise OR** - `|`
-- [ ] **Bitwise XOR** - `^`
-- [ ] **Bitwise NOT** - `~`
+- [x] **Bitwise AND** - `&` (all backends)
+- [x] **Bitwise OR** - `|` (all backends)
+- [x] **Bitwise XOR** - `^` (all backends)
+- [x] **Bitwise NOT** - `~` (all backends)
 
 #### Shift Operators
-- [ ] **Left shift** - `<<`
-- [ ] **Right shift** - `>>`
+- [x] **Left shift** - `<<` (all backends)
+- [x] **Right shift** - `>>` (all backends)
+
+#### Additional
+- [x] **Modulo** - `%` (all backends)
+- [x] **Less-equal** - `<=` (lexer, codegen)
+- [x] **Greater-equal** - `>=` (lexer, codegen)
 
 #### Pointer Operations
 - [ ] **Address-of** - `&variable`
@@ -168,13 +173,14 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 ### Machine Code Implementation Status:
 | Feature | Parsed | C Output | ASM Output | Machine Code |
 |---------|--------|----------|------------|--------------|
-| Function params | ✅ | ❌ | ❌ | ❌ |
-| User fn calls | ❌ | ❌ | ❌ | ❌ |
+| Function params | ✅ | ✅ | ✅ | ✅ |
+| User fn calls | ✅ | ✅ | ✅ | ✅ |
 | Arrays | ✅ | ❌ | ❌ | ❌ |
 | Structs | ❌ | ❌ | ❌ | ❌ |
-| Bitwise ops | ❌ | ❌ | ❌ | ❌ |
-| Shifts | ❌ | ❌ | ❌ | ❌ |
-| Syscalls | N/A | N/A | N/A | ❌ (encoder exists) |
+| Bitwise ops | ✅ | ✅ | ✅ | ✅ |
+| Shifts | ✅ | ✅ | ✅ | ✅ |
+| Modulo | ✅ | ✅ | ✅ | ✅ |
+| Syscalls | N/A | N/A | N/A | ✅ (exit, write) |
 
 ### Status: IN PROGRESS
 
