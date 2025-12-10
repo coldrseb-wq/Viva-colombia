@@ -1,0 +1,89 @@
+// Mini Lexer v2 - Bootstrap Test (avoid sino si for now)
+println("=== Mini Lexer Bootstrap Test ===");
+
+// Test source
+decreto source = "decreto x = 42";
+decreto pos = 0;
+decreto len = longitud(source);
+
+println("Tokenizing:");
+println(source);
+println("Length:");
+println(len);
+
+// Helper functions
+funcion is_alpha(c) {
+    si (c >= 65 && c <= 90) { retorno 1; }
+    si (c >= 97 && c <= 122) { retorno 1; }
+    si (c == 95) { retorno 1; }
+    retorno 0;
+}
+
+funcion is_digit(c) {
+    si (c >= 48 && c <= 57) { retorno 1; }
+    retorno 0;
+}
+
+funcion is_space(c) {
+    si (c == 32) { retorno 1; }
+    si (c == 9) { retorno 1; }
+    si (c == 10) { retorno 1; }
+    retorno 0;
+}
+
+// Tokenize
+decreto token_count = 0;
+mientras (pos < len) {
+    // Skip whitespace
+    mientras (pos < len && is_space(source[pos])) {
+        pos = pos + 1;
+    }
+    si (pos >= len) { romper; }
+
+    decreto ch = source[pos];
+
+    // Check for identifier/keyword
+    si (is_alpha(ch)) {
+        print("TOKEN: ");
+        mientras (pos < len && (is_alpha(source[pos]) || is_digit(source[pos]))) {
+            decreto c = source[pos];
+            // Output char using file write
+            archivo f;
+            f = abrir("/dev/stdout", "w");
+            escribir_byte(f, c);
+            cerrar(f);
+            pos = pos + 1;
+        }
+        println("");
+        token_count = token_count + 1;
+    } sino {
+        // Check for number
+        si (is_digit(ch)) {
+            print("NUMBER: ");
+            mientras (pos < len && is_digit(source[pos])) {
+                decreto c = source[pos];
+                archivo f;
+                f = abrir("/dev/stdout", "w");
+                escribir_byte(f, c);
+                cerrar(f);
+                pos = pos + 1;
+            }
+            println("");
+            token_count = token_count + 1;
+        } sino {
+            // Operators
+            si (ch == 61) {
+                println("OP: =");
+            } sino {
+                print("CHAR: ");
+                println(ch);
+            }
+            pos = pos + 1;
+            token_count = token_count + 1;
+        }
+    }
+}
+
+println("Total tokens:");
+println(token_count);
+println("=== Complete ===");

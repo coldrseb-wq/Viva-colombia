@@ -1,0 +1,5 @@
+// Test strlen
+decreto s = "Hello World";
+decreto len = longitud(s);
+println("Length:");
+println(len);

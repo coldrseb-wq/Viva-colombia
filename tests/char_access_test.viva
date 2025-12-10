@@ -1,0 +1,4 @@
+// Test character access
+decreto str = "Hello";
+decreto ch = str[0];
+println(ch);

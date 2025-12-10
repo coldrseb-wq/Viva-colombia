@@ -68,3 +68,10 @@ stdlib_test.c
 file_test.c
 phase7_test
 phase7_test.c
+
+# Bootstrap test generated files
+bootstrap_test.txt
+byte_test.bin
+tests/*.c
+tests/*_exe
+tests/*_exec

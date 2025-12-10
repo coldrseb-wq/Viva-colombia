@@ -1,0 +1,9 @@
+// Test && in while
+decreto i = 0;
+decreto j = 5;
+mientras (i < 3 && j > 2) {
+    println(i);
+    i = i + 1;
+    j = j - 1;
+}
+println("done");

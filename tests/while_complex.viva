@@ -1,0 +1,7 @@
+// While loop test
+decreto i = 0;
+mientras (i < 5) {
+    println(i);
+    i = i + 1;
+}
+println("done");

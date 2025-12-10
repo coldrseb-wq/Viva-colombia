@@ -1,0 +1,115 @@
+// Mini Lexer in Viva - Bootstrap Test
+// This lexer can tokenize a simple subset of Viva
+
+println("=== Mini Lexer Bootstrap Test ===");
+
+// Simple test string to tokenize
+decreto source = "decreto x = 42;";
+decreto pos = 0;
+decreto len = longitud(source);
+
+println("Tokenizing: ");
+println(source);
+println("Length: ");
+println(len);
+
+// Token types
+decreto TOKEN_ID = 1;
+decreto TOKEN_NUM = 2;
+decreto TOKEN_OP = 3;
+decreto TOKEN_SEMI = 4;
+decreto TOKEN_KW = 5;
+
+// Helper: check if character is alphanumeric
+funcion is_alpha(c) {
+    si (c >= 65 && c <= 90) {
+        retorno 1;
+    }
+    si (c >= 97 && c <= 122) {
+        retorno 1;
+    }
+    si (c == 95) {
+        retorno 1;
+    }
+    retorno 0;
+}
+
+funcion is_digit(c) {
+    si (c >= 48 && c <= 57) {
+        retorno 1;
+    }
+    retorno 0;
+}
+
+funcion is_space(c) {
+    si (c == 32 || c == 9 || c == 10 || c == 13) {
+        retorno 1;
+    }
+    retorno 0;
+}
+
+// Simple tokenizer
+decreto token_count = 0;
+
+mientras (pos < len) {
+    decreto ch = source[pos];
+
+    // Skip whitespace
+    mientras (pos < len && is_space(source[pos])) {
+        pos = pos + 1;
+    }
+
+    si (pos >= len) {
+        romper;
+    }
+
+    ch = source[pos];
+
+    // Identifier or keyword
+    si (is_alpha(ch)) {
+        decreto start = pos;
+        mientras (pos < len && (is_alpha(source[pos]) || is_digit(source[pos]))) {
+            pos = pos + 1;
+        }
+        // Found identifier from start to pos
+        print("TOKEN[ID]: ");
+        decreto i = start;
+        mientras (i < pos) {
+            // Print character
+            decreto c = chr(source[i]);
+            // For now just print the code
+            i = i + 1;
+        }
+        // Just output that we found an identifier
+        println("(identifier found)");
+        token_count = token_count + 1;
+    }
+    // Number
+    sino si (is_digit(ch)) {
+        decreto start = pos;
+        mientras (pos < len && is_digit(source[pos])) {
+            pos = pos + 1;
+        }
+        println("TOKEN[NUM]: (number found)");
+        token_count = token_count + 1;
+    }
+    // Operators and punctuation
+    sino {
+        si (ch == 61) {
+            println("TOKEN[OP]: =");
+        }
+        sino si (ch == 59) {
+            println("TOKEN[SEMI]: ;");
+        }
+        sino {
+            print("TOKEN[?]: ");
+            println(ch);
+        }
+        pos = pos + 1;
+        token_count = token_count + 1;
+    }
+}
+
+println("Total tokens: ");
+println(token_count);
+println("=== Mini Lexer Test Complete ===");

@@ -1,0 +1,9 @@
+// Test sino si
+decreto x = 5;
+si (x == 1) {
+    println("one");
+} sino si (x == 5) {
+    println("five");
+} sino {
+    println("other");
+}

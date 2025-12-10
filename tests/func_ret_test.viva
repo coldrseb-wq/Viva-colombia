@@ -1,0 +1,7 @@
+// Function with return test
+funcion foo(x) {
+    retorno x + 1;
+}
+
+decreto y = foo(5);
+println(y);
