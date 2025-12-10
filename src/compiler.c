@@ -405,7 +405,19 @@ static void compile_call(Compiler* c, ASTNode* n) {
         else if (strstr(fn,"cano")) emit(c, "cano();\n");
         else if (strstr(fn,"gaitan")) emit(c, "gaitan();\n");
         else if (strstr(fn,"garcia")) emit(c, "garcia();\n");
-        else emit(c, "%s();\n", fn);
+        else {
+            // User-defined function call with arguments
+            emit(c, "%s(", fn);
+            ASTNode* arg = n->left;
+            int first = 1;
+            while (arg) {
+                if (!first) emit(c, ", ");
+                compile_expr(c, arg);
+                first = 0;
+                arg = arg->right;
+            }
+            emit(c, ");\n");
+        }
     }
     else if (c->mode == OUT_ASM) {
         emit(c, "    ; call %s\n", fn);
@@ -704,7 +716,19 @@ static void compile_func(Compiler* c, ASTNode* n) {
     const char* name = n->value ? n->value : "func";
 
     if (c->mode == OUT_C) {
-        emit(c, "int %s() {\n", name);
+        // Emit function signature with parameters
+        emit(c, "int %s(", name);
+
+        // Parameters are stored in n->left as a linked list
+        ASTNode* param = n->left;
+        int first = 1;
+        while (param) {
+            if (!first) emit(c, ", ");
+            emit(c, "int %s", param->value ? param->value : "arg");
+            first = 0;
+            param = param->right;
+        }
+        emit(c, ") {\n");
         c->indent++;
         compile_node(c, n->body);
         c->indent--;
@@ -726,13 +750,28 @@ static void compile_func(Compiler* c, ASTNode* n) {
     }
 }
 
+// === FUNCTION DECLARATION PASS (for C output - hoists functions outside main) ===
+static void compile_functions_pass(Compiler* c, ASTNode* n) {
+    while (n) {
+        if (n->type == PROGRAM_NODE) {
+            compile_functions_pass(c, n->left);
+        } else if (n->type == FN_DECL_NODE || n->type == FN_DECL_SPANISH_NODE) {
+            compile_func(c, n);
+        }
+        n = n->right;
+    }
+}
+
 // === NODE DISPATCHER ===
-static void compile_node(Compiler* c, ASTNode* n) {
+// skip_funcs: if true, skip function declarations (they're hoisted in C mode)
+static void compile_node_ex(Compiler* c, ASTNode* n, int skip_funcs) {
     while (n) {
         switch (n->type) {
-            case PROGRAM_NODE: compile_node(c, n->left); break;
+            case PROGRAM_NODE: compile_node_ex(c, n->left, skip_funcs); break;
             case FN_CALL_NODE: compile_call(c, n); break;
-            case FN_DECL_NODE: case FN_DECL_SPANISH_NODE: compile_func(c, n); break;
+            case FN_DECL_NODE: case FN_DECL_SPANISH_NODE:
+                if (!skip_funcs) compile_func(c, n);
+                break;
             case VAR_DECL_NODE: compile_var(c, n, 0); break;
             case VAR_DECL_SPANISH_NODE: compile_var(c, n, 1); break;
             case ASSIGN_NODE: compile_assign(c, n); break;
@@ -740,7 +779,7 @@ static void compile_node(Compiler* c, ASTNode* n) {
             case WHILE_NODE: case WHILE_SPANISH_NODE: compile_while(c, n); break;
             case FOR_NODE: case FOR_SPANISH_NODE: compile_for(c, n); break;
             case RETURN_NODE: compile_return(c, n); break;
-            case BREAK_NODE: 
+            case BREAK_NODE:
                 if (c->mode == OUT_C) { indent(c); emit(c, "break;\n"); }
                 break;
             case CONTINUE_NODE:
@@ -752,9 +791,15 @@ static void compile_node(Compiler* c, ASTNode* n) {
     }
 }
 
+static void compile_node(Compiler* c, ASTNode* n) {
+    compile_node_ex(c, n, 0);
+}
+
 // === MAIN WRAPPER ===
 static void compile_main(Compiler* c, ASTNode* ast) {
     if (c->mode == OUT_C) {
+        // For C output: first emit function definitions BEFORE main()
+        compile_functions_pass(c, ast);
         emit(c, "int main() {\n");
         c->indent = 1;
     } else if (c->mode == OUT_ASM) {
@@ -764,8 +809,10 @@ static void compile_main(Compiler* c, ASTNode* ast) {
         encode_mov_rbp_rsp(c->mc);
         encode_sub_rsp_imm8(c->mc, 128);
     }
-    
-    compile_node(c, ast);
+
+    // For C mode, skip function declarations (already hoisted)
+    // For other modes, compile everything
+    compile_node_ex(c, ast, c->mode == OUT_C ? 1 : 0);
     
     if (c->mode == OUT_C) {
         emit(c, "    return 0;\n}\n");

@@ -1,0 +1,24 @@
+// Test function definitions in Viva
+
+// Define a simple function (English style)
+fn greet() {
+    println("Hello from greet function!");
+}
+
+// Define a function (Spanish style - cancion)
+cancion saludar() {
+    println("Hola desde saludar!");
+}
+
+// Main code
+println("=== Function Definition Test ===");
+
+// Call the hero functions (built-in)
+bolivar();
+garcia();
+
+// Call our custom functions
+greet();
+saludar();
+
+println("=== Test Complete ===");

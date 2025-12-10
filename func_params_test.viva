@@ -1,0 +1,22 @@
+// Test function definitions with parameters
+
+// Function with parameter
+fn add(x, y) {
+    decreto result = x + y;
+    println(result);
+}
+
+// Spanish style function with parameters
+cancion multiplicar(a, b) {
+    decreto producto = a * b;
+    println(producto);
+}
+
+// Main code
+println("=== Function Parameters Test ===");
+
+// Call functions with arguments
+add(5, 3);
+multiplicar(4, 7);
+
+println("=== Test Complete ===");

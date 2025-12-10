@@ -116,24 +116,35 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
             node->value = strdup(current_token->value);  // function name
             (*pos) += 2;  // skip identifier and left parenthesis
 
-            // Parse the first argument if it exists (for now, just handle single argument)
-            if (*pos < tokens->count && tokens->tokens[*pos]->type != RPAREN) {
-                node->left = parse_expression(tokens, pos);
-            }
+            // Parse arguments as comma-separated list
+            ASTNode* first_arg = NULL;
+            ASTNode* current_arg = NULL;
 
-            // Skip to the closing parenthesis
-            int paren_count = 1;
-            while (*pos < tokens->count && paren_count > 0) {
-                if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
-                    paren_count++;
-                } else if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
-                    paren_count--;
+            while (*pos < tokens->count && tokens->tokens[*pos]->type != RPAREN) {
+                ASTNode* arg = parse_expression(tokens, pos);
+                if (arg) {
+                    if (first_arg == NULL) {
+                        first_arg = arg;
+                        current_arg = arg;
+                    } else {
+                        current_arg->right = arg;
+                        current_arg = arg;
+                    }
                 }
-                if (paren_count > 0) {
-                    (*pos)++;
+
+                // Check for comma (more arguments) or end
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == COMMA) {
+                    (*pos)++; // skip comma
+                } else {
+                    break; // end of arguments
                 }
             }
-            if (*pos < tokens->count) (*pos)++; // skip final RPAREN
+            node->left = first_arg;
+
+            // Skip closing parenthesis
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++;
+            }
 
             // Check and consume semicolon if present after function call
             if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
@@ -684,13 +695,13 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                     (*pos)++; // skip '}'
                 }
 
-                // Store the function body in func_node->right
-                func_node->right = func_body;  // function body
+                // Store the function body in func_node->body (consistent with control flow nodes)
+                func_node->body = func_body;  // function body
 
                 return func_node;
             } else {
                 // No body, still return the function node with parameters
-                func_node->right = NULL;  // no body
+                func_node->body = NULL;  // no body
                 return func_node;
             }
         } else {
