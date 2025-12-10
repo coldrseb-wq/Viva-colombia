@@ -33,9 +33,13 @@ typedef enum {
     PARA,           // Spanish for "for"
     HASTA,          // Spanish for "until"
     RETORNO,        // Spanish for "return"
+    ROMPER,         // Spanish for "break"
+    CONTINUAR,      // Spanish for "continue"
     Y,              // Spanish for "and" (&&)
     O,              // Spanish for "or" (||)
     NO,             // Spanish for "not" (!)
+    LBRACKET,       // Left bracket [
+    RBRACKET,       // Right bracket ]
     UNKNOWN
 } TokenType;
 

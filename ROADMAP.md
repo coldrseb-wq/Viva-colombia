@@ -90,11 +90,17 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Function call implementation in machine code
 - ✅ Symbol table and relocation infrastructure
 - ✅ Cross-compilation targeting all platforms (Linux, macOS, Windows)
+- ✅ Complete variable storage management with proper stack frame tracking
+- ✅ Fixed variable lookup for all output modes (C, Assembly, ELF)
+- ✅ Proper register allocation for complex operations
+- ✅ Complete machine code implementation for conditionals (if/else statements) with both C and assembly backends
+- ✅ Added support for 'sino' (else) clauses in Spanish if statements
+- ✅ Complete expression evaluation in machine code including comparison operations
+- ✅ Proper conditional jump handling with offset calculation in ELF mode
+- ✅ Assignment operation fixes for all output modes
 
 ### Current Tasks:
 - [ ] Advanced machine code optimization passes
-- [ ] Complete expression evaluation in machine code
-- [ ] Loop and conditional instructions in machine code
 - [ ] Memory management in machine code
 - [ ] Function definition support in machine code
 - [ ] Complete Colombian cultural features

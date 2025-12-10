@@ -218,10 +218,24 @@ int encode_mul_rbx(MachineCode* mc);
 int encode_div_rbx(MachineCode* mc);
 int encode_mov_rax_from_memory(MachineCode* mc, int offset_from_rbp);
 int encode_mov_memory_from_rax(MachineCode* mc, int offset_from_rbp);
+int encode_mov_rbx_from_memory(MachineCode* mc, int offset_from_rbp);
+int encode_mov_rcx_from_memory(MachineCode* mc, int offset_from_rbp);
+int encode_mov_rbx_from_rax(MachineCode* mc);
+int encode_mov_rcx_from_rax(MachineCode* mc);
+int encode_mov_rbx_from_rcx(MachineCode* mc);
+int encode_mov_rdi_from_rax(MachineCode* mc);
+int encode_mov_rsi_imm32(MachineCode* mc, int32_t value);
+int encode_mov_rax_from_rbx(MachineCode* mc);
 int encode_pop_rbp(MachineCode* mc);
 int encode_ret(MachineCode* mc);
 int encode_call_printf(MachineCode* mc);
 int encode_call_external(MachineCode* mc);
+int encode_mov_rax_from_rdi(MachineCode* mc);
+int encode_mov_rax_from_rsi(MachineCode* mc);
+int encode_mov_rax_from_rdx(MachineCode* mc);
+int encode_mov_rax_from_rcx(MachineCode* mc);
+int encode_mov_rax_from_r8(MachineCode* mc);
+int encode_mov_rax_from_r9(MachineCode* mc);
 int add_relocation_entry(MachineCode* mc, uint32_t sym_index, uint32_t type, int64_t addend);
 
 // ELF-related functions

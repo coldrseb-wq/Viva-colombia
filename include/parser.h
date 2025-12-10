@@ -21,6 +21,11 @@ typedef enum {
     IF_SPANISH_NODE,        // For "si" conditionals
     WHILE_SPANISH_NODE,     // For "mientras" loops
     FOR_SPANISH_NODE,       // For "para" loops
+    RETURN_NODE,            // For "retorno" return statements
+    BREAK_NODE,             // For "romper" break statements
+    CONTINUE_NODE,          // For "continuar" continue statements
+    ARRAY_ACCESS_NODE,      // For array access operations (arr[index])
+    ARRAY_DECL_NODE,        // For array declarations and assignments
     UNARY_OP_NODE,          // For unary operations like ! (not)
     CONDITION_NODE          // For condition expressions
 } NodeType;

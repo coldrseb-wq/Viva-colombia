@@ -180,6 +180,8 @@ TokenStream* tokenize(const char* source) {
                 case '}': type = RBRACE; break;
                 case ';': type = SEMICOLON; break;
                 case ',': type = COMMA; break;
+                case '[': type = LBRACKET; break;
+                case ']': type = RBRACKET; break;
                 default: type = UNKNOWN; break;
             }
 

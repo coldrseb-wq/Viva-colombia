@@ -1,0 +1,3 @@
+decreto a = 5;
+decreto b = 3;
+println(a + b);

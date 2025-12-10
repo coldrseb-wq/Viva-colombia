@@ -1,4 +1,4 @@
-// src/compiler.c - FIXED & COMPLETE VERSION - DEC 2025
+// src/compiler.c - Fixed & Refactored
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,2114 +6,585 @@
 #include <stdint.h>
 #include "../include/lexer.h"
 #include "../include/parser.h"
-#include "../include/interpreter.h"
 #include "../include/compiler.h"
 #include "../include/machine_code.h"
 
-// Forward declarations for machine code encoding functions to avoid implicit declarations
-int encode_push_rbp(MachineCode* mc);
-int encode_mov_rbp_rsp(MachineCode* mc);
-int encode_mov_rdi_imm64(MachineCode* mc, uint64_t value);
-int encode_mov_rbp_rdi(MachineCode* mc);
-int encode_mov_rax_imm32(MachineCode* mc, int32_t value);
-int encode_mov_rbx_imm32(MachineCode* mc, int32_t value);
-int encode_mov_rcx_imm32(MachineCode* mc, int32_t value);
-int encode_add_rax_rbx(MachineCode* mc);
-int encode_sub_rax_rbx(MachineCode* mc);
-int encode_mul_rbx(MachineCode* mc);
-int encode_div_rbx(MachineCode* mc);
-int encode_mov_rax_from_memory(MachineCode* mc, int offset_from_rbp);
-int encode_mov_memory_from_rax(MachineCode* mc, int offset_from_rbp);
-int encode_mov_rbx_from_memory(MachineCode* mc, int offset_from_rbp);
-int encode_mov_rcx_from_memory(MachineCode* mc, int offset_from_rbp);
-int encode_mov_rbx_from_rax(MachineCode* mc);
-int encode_mov_rcx_from_rax(MachineCode* mc);
-int encode_mov_rbx_from_rcx(MachineCode* mc);
-int encode_mov_rdi_from_rax(MachineCode* mc);
-int encode_mov_rsi_imm32(MachineCode* mc, int32_t value);
-int encode_mov_rax_from_rbx(MachineCode* mc);
-int encode_pop_rbp(MachineCode* mc);
-int encode_ret(MachineCode* mc);
-int encode_call_printf(MachineCode* mc);
-int encode_call_external(MachineCode* mc);
+#define MAX_VARS 100
+#define MAX_STRS 100
+#define MAX_BUF 16384
 
-#define MAX_VARIABLES 100
-#define MAX_STRINGS 100
-#define MAX_FILENAME_LENGTH 256
-#define MAX_CODE_BUFFER 8192
+typedef enum { OUT_C, OUT_ASM, OUT_ELF } OutMode;
+
+typedef struct { char name[64]; int is_str; int offset; } Var;
+typedef struct { char val[256]; char lbl[32]; } Str;
 
 typedef struct {
-    char name[64];
-    int is_string;
-} VariableInfo;
-
-typedef struct {
-    char value[256];
-    char label[64];
-} StringInfo;
-
-typedef enum { OUTPUT_C, OUTPUT_ASM, OUTPUT_ELF } OutputMode;
-
-typedef struct {
-    char name[64];
-    int symbol_index;
-} ExternalSymbol;
-
-#define MAX_EXTERNAL_SYMBOLS 100
-
-typedef struct {
-    FILE* output_file;
-    OutputMode output_mode;
-    PlatformTarget platform_target;
-    int indentation_level;
-    VariableInfo variables[MAX_VARIABLES];
-    int var_count;
-    StringInfo strings[MAX_STRINGS];
-    int string_count;
-    char code_buffer[MAX_CODE_BUFFER];
-    int code_buffer_pos;
-    char output_filename[MAX_FILENAME_LENGTH];
-    MachineCode* machine_code;
-    ExternalSymbol external_symbols[MAX_EXTERNAL_SYMBOLS];
-    int external_symbol_count;
-    ELFFile* elf_file;
-    void* platform_specific_data;
+    FILE* f;
+    OutMode mode;
+    PlatformTarget plat;
+    int indent;
+    Var vars[MAX_VARS];
+    int nvar;
+    Str strs[MAX_STRS];
+    int nstr;
+    char buf[MAX_BUF];
+    int bufpos;
+    char outname[256];
+    MachineCode* mc;
+    ELFFile* elf;
+    int stack_off;
 } Compiler;
 
+// Forward declarations
+static void compile_node(Compiler* c, ASTNode* n);
+static void compile_expr(Compiler* c, ASTNode* n);
 
-// === FORWARD DECLARATIONS (now properly defined below) ===
-void compile_ast_to_c_internal(Compiler* compiler, ASTNode* node, int inside_function);
-void compile_expression(Compiler* compiler, ASTNode* node);
-void compile_statement_list(Compiler* compiler, ASTNode* node);
-void compile_var_decl_node(Compiler* compiler, ASTNode* node, int is_spanish);
-void compile_assignment_node(Compiler* compiler, ASTNode* node);
-void compile_if_node(Compiler* compiler, ASTNode* node);
-void compile_while_node(Compiler* compiler, ASTNode* node);
-void compile_function_call_node(Compiler* compiler, ASTNode* node);
-void free_compiler(Compiler* compiler);
-int generate_platform_object_file(Compiler* compiler);
-
-Compiler* init_compiler(const char* output_filename, OutputMode mode) {
-    Compiler* c = calloc(1, sizeof(Compiler));
-    c->output_mode = mode;
-    c->platform_target = PLATFORM_LINUX;
-    strncpy(c->output_filename, output_filename, MAX_FILENAME_LENGTH - 1);
-
-    if (mode == OUTPUT_ELF) {
-        c->machine_code = init_machine_code();
-        c->elf_file = init_elf_file();
+static void emit(Compiler* c, const char* fmt, ...) {
+    va_list a; va_start(a, fmt);
+    if (c->mode == OUT_ASM) {
+        int r = MAX_BUF - c->bufpos;
+        int n = vsnprintf(c->buf + c->bufpos, r, fmt, a);
+        if (n > 0 && n < r) c->bufpos += n;
+    } else {
+        vfprintf(c->f, fmt, a);
     }
+    va_end(a);
+}
 
-    c->output_file = fopen(output_filename, "w");
-    if (!c->output_file) { free(c); return NULL; }
+static void indent(Compiler* c) {
+    for (int i = 0; i < c->indent; i++) emit(c, "    ");
+}
 
-    if (mode == OUTPUT_C) {
-        fprintf(c->output_file,
+static int find_var(Compiler* c, const char* name) {
+    for (int i = 0; i < c->nvar; i++)
+        if (strcmp(c->vars[i].name, name) == 0) return i;
+    return -1;
+}
+
+static int add_var(Compiler* c, const char* name, int is_str) {
+    if (c->nvar >= MAX_VARS) return -1;
+    strncpy(c->vars[c->nvar].name, name, 63);
+    c->vars[c->nvar].is_str = is_str;
+    c->stack_off -= 8;
+    c->vars[c->nvar].offset = c->stack_off;
+    return c->nvar++;
+}
+
+static int get_var_off(Compiler* c, const char* name) {
+    int i = find_var(c, name);
+    return (i >= 0) ? c->vars[i].offset : -8;
+}
+
+static int is_var_str(Compiler* c, const char* name) {
+    int i = find_var(c, name);
+    return (i >= 0) ? c->vars[i].is_str : 0;
+}
+
+static char* add_str(Compiler* c, const char* s) {
+    if (c->nstr >= MAX_STRS) return "str_err";
+    static int cnt = 0;
+    snprintf(c->strs[c->nstr].lbl, 32, "str_%d", cnt++);
+    const char* p = (s[0] == '"') ? s + 1 : s;
+    strncpy(c->strs[c->nstr].val, p, 255);
+    size_t len = strlen(c->strs[c->nstr].val);
+    if (len > 0 && c->strs[c->nstr].val[len-1] == '"')
+        c->strs[c->nstr].val[len-1] = '\0';
+    return c->strs[c->nstr++].lbl;
+}
+
+static Compiler* init_compiler(const char* outfile, OutMode mode) {
+    Compiler* c = calloc(1, sizeof(Compiler));
+    if (!c) return NULL;
+    c->mode = mode;
+    c->plat = PLATFORM_LINUX;
+    strncpy(c->outname, outfile, 255);
+    
+    if (mode == OUT_ELF) {
+        c->mc = init_machine_code();
+        c->elf = init_elf_file();
+    }
+    
+    c->f = fopen(outfile, "w");
+    if (!c->f) { free(c); return NULL; }
+    
+    if (mode == OUT_C) {
+        fprintf(c->f,
             "// Generated by Viva Colombia compiler\n"
             "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n"
-            "int builtin_print(char* s) { printf(\"%%s\", s); return 0; }\n"
-            "int builtin_println(char* s) { printf(\"%%s\\n\", s); return 0; }\n"
-            "void builtin_print_num(int n) { printf(\"%%d\", n); }\n"
-            "void builtin_println_num(int n) { printf(\"%%d\\n\", n); }\n"
-            "void builtin_simon_bolivar() { printf(\"Simón Bolívar: Libertador de Colombia, Venezuela, Ecuador, Perú y Bolivia\\n\"); }\n"
-            "void builtin_francisco_narino() { printf(\"Francisco de Paula Santander y Nariño: Héroe de la independencia colombiana\\n\"); }\n"
-            "void builtin_maria_cano() { printf(\"María Cano: Líder obrera y feminista colombiana\\n\"); }\n"
-            "void builtin_jorge_eliecer_gaitan() { printf(\"Jorge Eliécer Gaitán: Líder político y defensor del pueblo colombiano\\n\"); }\n"
-            "void builtin_gabriel_garcia_marquez() { printf(\"Gabriel García Márquez: Nobel de Literatura, autor de Cien Años de Soledad\\n\"); }\n\n");
-    } else if (mode == OUTPUT_ASM) {
-        fprintf(c->output_file,
-            "; Generated by Viva Colombia compiler\n"
+            "void prt(char* s){printf(\"%%s\",s);}\n"
+            "void prtln(char* s){printf(\"%%s\\n\",s);}\n"
+            "void prtnum(int n){printf(\"%%d\",n);}\n"
+            "void prtlnnum(int n){printf(\"%%d\\n\",n);}\n"
+            "void bolivar(){printf(\"Simon Bolivar: Libertador\\n\");}\n"
+            "void narino(){printf(\"Francisco Narino: Heroe\\n\");}\n"
+            "void cano(){printf(\"Maria Cano: Lider\\n\");}\n"
+            "void gaitan(){printf(\"Jorge Gaitan: Lider politico\\n\");}\n"
+            "void garcia(){printf(\"Gabriel Garcia Marquez: Nobel\\n\");}\n\n");
+    } else if (mode == OUT_ASM) {
+        fprintf(c->f,
+            "; Generated by Viva Colombia\n"
             "section .data\n"
-            "    fmt_str db \"%%s\", 10, 0\n"
-            "    fmt_num db \"%%d\", 10, 0\n"
-            "    str_simon db \"Simón Bolívar: Libertador...\", 10, 0\n"  // (shortened for brevity)\n
+            "    fmt_s db \"%%s\",10,0\n"
+            "    fmt_d db \"%%d\",10,0\n"
             "section .text\n"
             "    global main\n"
             "    extern printf\n\n");
     }
-
     return c;
 }
 
-void finish_compiler(Compiler* c) {
-    if (!c || !c->output_file) return;
-
-    if (c->output_mode == OUTPUT_ASM && c->code_buffer_pos > 0) {
-        fwrite(c->code_buffer, 1, c->code_buffer_pos, c->output_file);
+static void finish_compiler(Compiler* c) {
+    if (!c) return;
+    if (c->mode == OUT_ASM && c->bufpos > 0)
+        fwrite(c->buf, 1, c->bufpos, c->f);
+    if (c->mode == OUT_ELF && c->elf && c->mc) {
+        create_text_section(c->elf, c->mc);
+        create_symbol_table(c->elf);
+        write_complete_elf_file(c->elf, c->outname);
     }
-
-    if (c->output_mode == OUTPUT_ELF && c->elf_file) {
-        // For now, use the function names that exist in the code
-        write_complete_elf_file(c->elf_file, c->output_filename);
-    }
-
-    fclose(c->output_file);
-    if (c->machine_code) free_machine_code(c->machine_code);
-    if (c->elf_file) free_elf_file(c->elf_file);
+    if (c->f) fclose(c->f);
+    if (c->mc) free_machine_code(c->mc);
+    if (c->elf) free_elf_file(c->elf);
     free(c);
 }
-
-static void write_indent(Compiler* c) {
-    if (c->output_mode == OUTPUT_ASM) {
-        int r = MAX_CODE_BUFFER - c->code_buffer_pos;
-        if (r >= 4) { memcpy(c->code_buffer + c->code_buffer_pos, "    ", 4); c->code_buffer_pos += 4; }
-    } else {
-        for (int i = 0; i < c->indentation_level; i++) fprintf(c->output_file, "    ");
+static void compile_expr(Compiler* c, ASTNode* n) {
+    if (!n) return;
+    
+    if (n->type == NUMBER_NODE) {
+        if (c->mode == OUT_C) emit(c, "%s", n->value);
+        else if (c->mode == OUT_ASM) emit(c, "    mov rax, %s\n", n->value);
+        else if (c->mc) encode_mov_rax_imm32(c->mc, atoi(n->value));
     }
-}
-
-static void append(Compiler* c, const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    if (c->output_mode == OUTPUT_ASM) {
-        int r = MAX_CODE_BUFFER - c->code_buffer_pos;
-        int n = vsnprintf(c->code_buffer + c->code_buffer_pos, r, fmt, args);
-        if (n > 0 && n < r) c->code_buffer_pos += n;
-    } else {
-        vfprintf(c->output_file, fmt, args);
-    }
-    va_end(args);
-}
-
-
-// Register constants for expression compilation
-#define RAX_REG 0
-#define RBX_REG 1
-#define RCX_REG 2
-#define RDX_REG 3
-
-// Create a string label for string literals
-char* create_string_label(Compiler* c, const char* lit) {
-    static int counter = 0;
-    char* label = malloc(32);
-    snprintf(label, 32, "str_%d", counter++);
-    if (c->output_mode == OUTPUT_ASM) {
-        fprintf(c->output_file, "    %s: db %s, 0\n", label, lit);
-    }
-    return label;
-}
-
-// Append to buffer with proper formatting
-void append_to_buffer(Compiler* compiler, const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-
-    // For asm mode, use the append function which already handles buffer management
-    if (compiler->output_mode == OUTPUT_ASM) {
-        append(compiler, fmt, args);
-    } else {
-        // For other modes, directly output to file
-        vfprintf(compiler->output_file, fmt, args);
-    }
-
-    va_end(args);
-}
-
-// Write appropriate indentation based on mode
-void write_indentation(Compiler* compiler) {
-    if (compiler->output_mode == OUTPUT_ASM) {
-        append(compiler, "    ");
-    } else {
-        for (int i = 0; i < compiler->indentation_level; i++) {
-            fprintf(compiler->output_file, "    ");
+    else if (n->type == STRING_LITERAL_NODE) {
+        if (c->mode == OUT_C) emit(c, "%s", n->value);
+        else if (c->mode == OUT_ASM) {
+            char* l = add_str(c, n->value);
+            emit(c, "    lea rax, [%s]\n", l);
         }
     }
-}
-
-// Add variable to compiler's variable tracking
-void add_variable(Compiler* compiler, char* name, int is_string_type) {
-    if (compiler->var_count < MAX_VARIABLES) {
-        strncpy(compiler->variables[compiler->var_count].name, name, 63);
-        compiler->variables[compiler->var_count].name[63] = '\0';
-        compiler->variables[compiler->var_count].is_string = is_string_type;
-        compiler->var_count++;
-    }
-}
-
-// Get variable offset by name
-int get_variable_offset(Compiler* compiler, char* name) {
-    for (int i = 0; i < compiler->var_count; i++) {
-        if (strcmp(compiler->variables[i].name, name) == 0) {
-            // Return stack offset: -8 bytes per variable
-            return -(i + 1) * 8; // Variables at [rbp-8], [rbp-16], [rbp-24], etc.
-        }
-    }
-    return -1; // Not found
-}
-
-// Compile expression to a specific register
-void compile_expression_to_register(Compiler* compiler, ASTNode* node, int target_reg) {
-    if (node == NULL) return;
-
-    switch (node->type) {
-        case NUMBER_NODE: {
-            int32_t value = atoi(node->value);
-            if (target_reg == RAX_REG) {
-                encode_mov_rax_imm32(compiler->machine_code, value);
-            } else if (target_reg == RBX_REG) {
-                encode_mov_rbx_imm32(compiler->machine_code, value);
-            } else if (target_reg == RCX_REG) {
-                encode_mov_rcx_imm32(compiler->machine_code, value);
-            }
-            break;
-        }
-        case IDENTIFIER_NODE: {
-            // Check if it's a string literal
-            if (node->value[0] == '"' && node->value[strlen(node->value)-1] == '"') {
-                // String literal - for our purposes, just store a placeholder
-                if (target_reg == RAX_REG) {
-                    encode_mov_rax_imm32(compiler->machine_code, 0); // Placeholder for strings
-                } else if (target_reg == RBX_REG) {
-                    encode_mov_rbx_imm32(compiler->machine_code, 0);
-                } else if (target_reg == RCX_REG) {
-                    encode_mov_rcx_imm32(compiler->machine_code, 0);
-                }
-            } else {
-                // It's a variable name
-                int var_offset = get_variable_offset(compiler, node->value);
-                if (var_offset != -1) {
-                    // Variable exists, load from correct offset
-                    if (target_reg == RAX_REG) {
-                        encode_mov_rax_from_memory(compiler->machine_code, var_offset);
-                    } else if (target_reg == RBX_REG) {
-                        encode_mov_rbx_from_memory(compiler->machine_code, var_offset);
-                    } else if (target_reg == RCX_REG) {
-                        encode_mov_rcx_from_memory(compiler->machine_code, var_offset);
-                    }
-                } else {
-                    // Variable not found, use placeholder
-                    if (target_reg == RAX_REG) {
-                        encode_mov_rax_from_memory(compiler->machine_code, -8);
-                    } else if (target_reg == RBX_REG) {
-                        encode_mov_rbx_from_memory(compiler->machine_code, -8);
-                    } else if (target_reg == RCX_REG) {
-                        encode_mov_rcx_from_memory(compiler->machine_code, -8);
-                    }
-                }
-            }
-            break;
-        }
-        case BINARY_OP_NODE: {
-            // For binary operations, we need to handle them specially
-            // Use RCX and RDX as temporary registers to preserve values
-            compile_expression_to_register(compiler, node->left, RCX_REG);  // Left operand in RCX
-            compile_expression_to_register(compiler, node->right, RAX_REG); // Right operand in RAX
-
-            // Move left operand to RBX, right stays in RAX for operations
-            encode_mov_rbx_from_rcx(compiler->machine_code);
-
-            if (node->value && strcmp(node->value, "+") == 0) {
-                encode_add_rax_rbx(compiler->machine_code);
-            } else if (node->value && strcmp(node->value, "-") == 0) {
-                encode_sub_rax_rbx(compiler->machine_code);
-            } else if (node->value && strcmp(node->value, "*") == 0) {
-                encode_mul_rbx(compiler->machine_code);
-            } else if (node->value && strcmp(node->value, "/") == 0) {
-                encode_div_rbx(compiler->machine_code);
-            }
-
-            // Result is in RAX, move to target register if needed
-            if (target_reg == RBX_REG) {
-                encode_mov_rbx_from_rax(compiler->machine_code);
-            } else if (target_reg == RCX_REG) {
-                encode_mov_rcx_from_rax(compiler->machine_code);
-            }
-            break;
-        }
-        default:
-            // For other node types, load 0 as fallback
-            if (target_reg == RAX_REG) {
-                encode_mov_rax_imm32(compiler->machine_code, 0);
-            } else if (target_reg == RBX_REG) {
-                encode_mov_rbx_imm32(compiler->machine_code, 0);
-            } else if (target_reg == RCX_REG) {
-                encode_mov_rcx_imm32(compiler->machine_code, 0);
-            }
-            break;
-    }
-}
-
-// Compile program node
-void compile_program_node(Compiler* compiler, ASTNode* node) {
-    if (node == NULL) return;
-
-    // Process all statements in the program
-    ASTNode* current = node->left;
-    while (current != NULL) {
-        compile_ast_to_c_internal(compiler, current, 1); // 1 for inside a function context
-        if (current->right != NULL) {
-            current = current->right;
-        } else {
-            break;
-        }
-    }
-}
-
-// Compile function declaration node
-void compile_function_decl_node(Compiler* compiler, ASTNode* node) {
-    if (compiler->output_mode == OUTPUT_C) {
-        const char* func_name = node->value ? node->value : "main";
-
-        write_indentation(compiler);
-        if (node->type == FN_DECL_SPANISH_NODE) {
-            fprintf(compiler->output_file, "// Function 'cancion' %s\n", func_name);
-        } else {
-            fprintf(compiler->output_file, "// Function %s\n", func_name);
-        }
-
-        // For now, just process the function body if exists
-        if (node->left != NULL) {
-            fprintf(compiler->output_file, "void %s() {\n", func_name);
-            compiler->indentation_level++;
-            compile_ast_to_c_internal(compiler, node->left, 1); // 1 for inside function
-            compiler->indentation_level--;
-            fprintf(compiler->output_file, "}\n");
-        } else {
-            fprintf(compiler->output_file, "void %s() { }\n", func_name);
-        }
-    } else if (compiler->output_mode == OUTPUT_ASM) {
-        const char* func_name = node->value ? node->value : "main";
-
-        if (node->type == FN_DECL_SPANISH_NODE) {
-            append_to_buffer(compiler, "; Function 'cancion' %s\n", func_name);
-        } else {
-            append_to_buffer(compiler, "; Function %s\n", func_name);
-        }
-
-        // For assembly, we would need to generate proper function prologue/epilogue
-        append_to_buffer(compiler, "%s:\n    push rbp\n    mov rbp, rsp\n", func_name);
-
-        // Process function body
-        if (node->left != NULL) {
-            compile_ast_to_c_internal(compiler, node->left, 1);
-        }
-
-        // Function epilogue
-        append_to_buffer(compiler, "    mov rax, 0\n    pop rbp\n    ret\n");
-    } else if (compiler->output_mode == OUTPUT_ELF) {
-        // For ELF mode, generate function prologue and epilogue in machine code
-        const char* func_name = node->value ? node->value : "main";
-
-        if (node->left != NULL) {
-            // Function prologue
-            encode_push_rbp(compiler->machine_code);
-            encode_mov_rbp_rsp(compiler->machine_code);
-
-            // Process function body
-            compile_ast_to_c_internal(compiler, node->left, 1);
-
-            // Function epilogue
-            encode_mov_rax_imm32(compiler->machine_code, 0);
-            encode_pop_rbp(compiler->machine_code);
-            encode_ret(compiler->machine_code);
-        }
-    }
-}
-
-// Compile variable declaration node
-void compile_var_decl_node(Compiler* compiler, ASTNode* node, int is_spanish) {
-    if (compiler->output_mode == OUTPUT_C) {
-        write_indentation(compiler);
-
-        int is_string_type = 0;
-
-        if (is_spanish) {
-            if (node->left != NULL) {
-                if (node->left->type == NUMBER_NODE) {
-                    fprintf(compiler->output_file, "int %s = %s; // from decreto\n", node->value, node->left->value);
-                    is_string_type = 0;  // Number variable
-                } else if (node->left->type == IDENTIFIER_NODE) {
-                    // Check if it's a string literal
-                    if (node->left->value[0] == '"' && node->left->value[strlen(node->left->value)-1] == '"') {
-                        fprintf(compiler->output_file, "char* %s = %s; // from decreto\n", node->value, node->left->value);
-                        is_string_type = 1;  // String variable
-                    } else {
-                        fprintf(compiler->output_file, "char* %s = \"%s\"; // from decreto\n", node->value, node->left->value);
-                        is_string_type = 1;  // String variable
-                    }
-                } else {
-                    // For other expression types (like binary operations), handle them properly
-                    fprintf(compiler->output_file, "int %s = ", node->value);
-                    // Compile the expression as part of the assignment
-                    compile_expression(compiler, node->left);
-                    fprintf(compiler->output_file, "; // from decreto (expression)\n");
-                    is_string_type = 0;  // Assume number for expressions
-                }
+    else if (n->type == IDENTIFIER_NODE) {
+        if (n->value[0] == '"') {
+            if (c->mode == OUT_C) emit(c, "%s", n->value);
+            else if (c->mode == OUT_ASM) {
+                char* l = add_str(c, n->value);
+                emit(c, "    lea rax, [%s]\n", l);
             }
         } else {
-            if (node->left != NULL) {
-                if (node->left->type == NUMBER_NODE) {
-                    fprintf(compiler->output_file, "int %s = %s; // from let\n", node->value, node->left->value);
-                    is_string_type = 0;  // Number variable
-                } else if (node->left->type == IDENTIFIER_NODE &&
-                           node->left->value[0] == '"' && node->left->value[strlen(node->left->value)-1] == '"') {
-                    fprintf(compiler->output_file, "char* %s = %s; // from let\n", node->value, node->left->value);
-                    is_string_type = 1;  // String variable
-                } else {
-                    fprintf(compiler->output_file, "int %s = ", node->value);
-                    compile_expression(compiler, node->left);
-                    fprintf(compiler->output_file, "; // from let (expression)\n");
-                    is_string_type = 0;  // Assume number for expressions
-                }
+            if (c->mode == OUT_C) emit(c, "%s", n->value);
+            else if (c->mode == OUT_ASM) {
+                int off = get_var_off(c, n->value);
+                emit(c, "    mov rax, [rbp%+d]\n", off);
+            }
+            else if (c->mc) {
+                int off = get_var_off(c, n->value);
+                encode_mov_rax_from_memory(c->mc, off);
             }
         }
-
-        // Register the variable type for later use
-        if (node->value != NULL) {
-            add_variable(compiler, node->value, is_string_type);
+    }
+    else if (n->type == BINARY_OP_NODE) {
+        if (c->mode == OUT_C) {
+            emit(c, "(");
+            compile_expr(c, n->left);
+            emit(c, " %s ", n->value ? n->value : "+");
+            compile_expr(c, n->right);
+            emit(c, ")");
         }
-        fprintf(compiler->output_file, "\n");
-    } else if (compiler->output_mode == OUTPUT_ASM) {
-        // For assembly, we need to properly handle variable declaration
-        if (node->left != NULL) {
-            if (node->left->type == NUMBER_NODE) {
-                // For number variables - store in local area
-                append_to_buffer(compiler, "    ; Declare number variable: %s = %s\n", node->value, node->left->value);
-                // Store the immediate value in a memory location
-                // Using stack-based allocation: [rbp-8], [rbp-16], etc.
-                // For now, we'll store at a fixed location (in a complete implementation,
-                // we'd track variable offsets properly)
-                int var_offset = -(compiler->var_count * 8); // Allocate 8 bytes per variable
-                append_to_buffer(compiler, "    mov DWORD PTR [rbp%d], %s\n",
-                                var_offset, node->left->value);
-                add_variable(compiler, node->value, 0); // 0 = number
-            } else if (node->left->type == IDENTIFIER_NODE) {
-                if (node->left->value[0] == '"' && node->left->value[strlen(node->left->value)-1] == '"') {
-                    // String literal variable - get or create a label for it
-                    char* label = create_string_label(compiler, node->left->value);
-                    append_to_buffer(compiler, "    ; Declare string variable: %s = %s\n", node->value, node->left->value);
-                    append_to_buffer(compiler, "    mov rax, %s\n", label);  // Move string address to RAX
-                    // Store address in variable location
-                    int var_offset = -(compiler->var_count * 8);
-                    append_to_buffer(compiler, "    mov QWORD PTR [rbp%d], rax\n",
-                                    var_offset);
-                    add_variable(compiler, node->value, 1); // 1 = string
-                } else {
-                    // Variable assignment from another variable
-                    append_to_buffer(compiler, "    ; Declare variable: %s = %s\n", node->value, node->left->value);
-                    // Load value from source variable to RAX, then store to destination
-                    // For now just as a placeholder
-                    int src_var_offset = -(8); // Placeholder - would need to track actual variable locations
-                    int dst_var_offset = -(compiler->var_count * 8);
-                    append_to_buffer(compiler, "    mov eax, DWORD PTR [rbp-8]  ; load %s\n", node->left->value);
-                    append_to_buffer(compiler, "    mov DWORD PTR [rbp%d], eax\n",
-                                    dst_var_offset);
-                    add_variable(compiler, node->value, 0); // 0 = number
-                }
-            } else {
-                // For expressions, compile the expression
-                append_to_buffer(compiler, "    ; Declare variable: %s = expression result\n", node->value);
-                // Compile the expression and store the result
-                compile_expression(compiler, node->left);
-                // After compiling expression, result should be in RAX, store it
-                int var_offset = -(compiler->var_count * 8);
-                append_to_buffer(compiler, "    mov DWORD PTR [rbp%d], eax\n",
-                                var_offset);
-                add_variable(compiler, node->value, 0); // 0 = number (for expressions)
-            }
+        else if (c->mode == OUT_ASM) {
+            compile_expr(c, n->left);
+            emit(c, "    push rax\n");
+            compile_expr(c, n->right);
+            emit(c, "    mov rbx, rax\n    pop rax\n");
+            if (!n->value) return;
+            if (strcmp(n->value, "+") == 0) emit(c, "    add rax, rbx\n");
+            else if (strcmp(n->value, "-") == 0) emit(c, "    sub rax, rbx\n");
+            else if (strcmp(n->value, "*") == 0) emit(c, "    imul rax, rbx\n");
+            else if (strcmp(n->value, "/") == 0) emit(c, "    xor rdx,rdx\n    idiv rbx\n");
+            else if (strcmp(n->value, ">") == 0) emit(c, "    cmp rax,rbx\n    setg al\n    movzx rax,al\n");
+            else if (strcmp(n->value, "<") == 0) emit(c, "    cmp rax,rbx\n    setl al\n    movzx rax,al\n");
+            else if (strcmp(n->value, "==") == 0) emit(c, "    cmp rax,rbx\n    sete al\n    movzx rax,al\n");
+            else if (strcmp(n->value, "!=") == 0) emit(c, "    cmp rax,rbx\n    setne al\n    movzx rax,al\n");
+            else if (strcmp(n->value, ">=") == 0) emit(c, "    cmp rax,rbx\n    setge al\n    movzx rax,al\n");
+            else if (strcmp(n->value, "<=") == 0) emit(c, "    cmp rax,rbx\n    setle al\n    movzx rax,al\n");
         }
-    } else if (compiler->output_mode == OUTPUT_ELF) {
-        // For ELF mode, handle variable declarations in machine code
-        if (node->left != NULL) {
-            if (node->left->type == NUMBER_NODE) {
-                // For number variables in ELF mode
-                int32_t value = atoi(node->left->value);
-                if (compiler->machine_code) {
-                    encode_mov_rax_imm32(compiler->machine_code, value);
-                    // Store to memory location (need to track variable location)
-                    // For now using placeholder offset
-                    encode_mov_memory_from_rax(compiler->machine_code, -(compiler->var_count * 8));
-                }
-            } else if (node->left->type == IDENTIFIER_NODE) {
-                if (node->left->value[0] == '"' && node->left->value[strlen(node->left->value)-1] == '"') {
-                    // String literal assignment in ELF mode
-                    char* label = create_string_label(compiler, node->left->value);
-                    append_to_buffer(compiler, "; String variable declaration not fully implemented in ELF mode\n");
-                    add_variable(compiler, node->value, 1); // 1 = string
-                } else {
-                    // Variable assignment from another variable in ELF mode
-                    // Load the value of the source variable and store it
-                    compile_expression(compiler, node->left);
-                    // Store result to the new variable's location
-                    encode_mov_memory_from_rax(compiler->machine_code, -(compiler->var_count * 8));
-                }
-            } else {
-                // For expressions in ELF mode
-                compile_expression(compiler, node->left);
-                // Store the expression result to the variable's location
-                encode_mov_memory_from_rax(compiler->machine_code, -(compiler->var_count * 8));
-            }
-            add_variable(compiler, node->value, 0); // Track the variable
+        else if (c->mc) {
+            compile_expr(c, n->left);
+            encode_mov_memory_from_rax(c->mc, -200); // temp
+            compile_expr(c, n->right);
+            encode_mov_rbx_imm32(c->mc, 0);
+            encode_mov_rax_from_memory(c->mc, -200);
+            if (n->value && strcmp(n->value, "+") == 0) encode_add_rax_rbx(c->mc);
+            else if (n->value && strcmp(n->value, "-") == 0) encode_sub_rax_rbx(c->mc);
+            else if (n->value && strcmp(n->value, "*") == 0) encode_mul_rbx(c->mc);
+            else if (n->value && strcmp(n->value, "/") == 0) encode_div_rbx(c->mc);
+        }
+    }
+    else if (n->type == UNARY_OP_NODE) {
+        ASTNode* op = n->right ? n->right : n->left;
+        if (c->mode == OUT_C) {
+            if (n->value && (strcmp(n->value,"!")==0 || strcmp(n->value,"no")==0)) emit(c, "!");
+            else if (n->value && strcmp(n->value,"-")==0) emit(c, "-");
+            compile_expr(c, op);
+        } else if (c->mode == OUT_ASM) {
+            compile_expr(c, op);
+            if (n->value && (strcmp(n->value,"!")==0 || strcmp(n->value,"no")==0))
+                emit(c, "    cmp rax,0\n    sete al\n    movzx rax,al\n");
+            else if (n->value && strcmp(n->value,"-")==0)
+                emit(c, "    neg rax\n");
         }
     }
 }
 
-// Compile assignment node
-void compile_assignment_node(Compiler* compiler, ASTNode* node) {
-    if (compiler->output_mode == OUTPUT_C) {
-        if (node->value != NULL && node->left != NULL) {
-            write_indentation(compiler);
-            fprintf(compiler->output_file, "%s = ", node->value);
-            // Compile the right-hand side expression
-            compile_expression(compiler, node->left);
-            fprintf(compiler->output_file, ";\n");
+static void compile_call(Compiler* c, ASTNode* n) {
+    if (!n || !n->value) return;
+    const char* fn = n->value;
+    
+    if (c->mode == OUT_C) {
+        indent(c);
+        if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
+            int ln = (strcmp(fn,"println")==0);
+            if (n->left && n->left->type == NUMBER_NODE)
+                emit(c, "prt%snum(%s);\n", ln?"ln":"", n->left->value);
+            else if (n->left && (n->left->type == STRING_LITERAL_NODE || 
+                     (n->left->type == IDENTIFIER_NODE && n->left->value[0]=='"')))
+                emit(c, "prt%s(%s);\n", ln?"ln":"", n->left->value);
+            else if (n->left && n->left->type == IDENTIFIER_NODE) {
+                if (is_var_str(c, n->left->value))
+                    emit(c, "prt%s(%s);\n", ln?"ln":"", n->left->value);
+                else
+                    emit(c, "prt%snum(%s);\n", ln?"ln":"", n->left->value);
+            }
+            else emit(c, "prt%s(\"\");\n", ln?"ln":"");
         }
-    } else if (compiler->output_mode == OUTPUT_ASM) {
-        if (node->value != NULL && node->left != NULL) {
-            append_to_buffer(compiler, "; Assignment: %s = ...\n", node->value);
-            // For assembly, compile the right-hand side to get its value in a register
-            // Then store that value to the variable's location
-            compile_expression(compiler, node->left);
-            // Now we need to store the result (in RAX) to the variable location
-            // For now, just use a placeholder
-            append_to_buffer(compiler, "    mov [%s], eax  ; Store result to variable %s\n", node->value, node->value);
+        else if (strstr(fn,"bolivar")) emit(c, "bolivar();\n");
+        else if (strstr(fn,"narino")) emit(c, "narino();\n");
+        else if (strstr(fn,"cano")) emit(c, "cano();\n");
+        else if (strstr(fn,"gaitan")) emit(c, "gaitan();\n");
+        else if (strstr(fn,"garcia")) emit(c, "garcia();\n");
+        else emit(c, "%s();\n", fn);
+    }
+    else if (c->mode == OUT_ASM) {
+        emit(c, "    ; call %s\n", fn);
+        if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
+            if (n->left && n->left->type == NUMBER_NODE) {
+                emit(c, "    mov rdi, fmt_d\n    mov rsi, %s\n", n->left->value);
+            } else if (n->left) {
+                char* l = add_str(c, n->left->value);
+                emit(c, "    mov rdi, fmt_s\n    lea rsi, [%s]\n", l);
+            }
+            emit(c, "    xor rax,rax\n    call printf\n");
         }
-    } else if (compiler->output_mode == OUTPUT_ELF) {
-        if (node->value != NULL && node->left != NULL) {
-            // For ELF mode, compile the right-hand side expression
-            // The result should be in RAX after compile_expression
-            compile_expression(compiler, node->left);
-            // Now we need to store RAX to the variable's memory location
-            // For now, use placeholder for variable location
-            encode_mov_memory_from_rax(compiler->machine_code, -(8)); // Placeholder location
+    }
+    else if (c->mc) {
+        if (strcmp(fn,"println")==0 || strcmp(fn,"print")==0) {
+            if (n->left && n->left->type == NUMBER_NODE) {
+                encode_mov_rdi_imm64(c->mc, 0);
+                encode_mov_rax_imm32(c->mc, atoi(n->left->value));
+            }
+            encode_call_external(c->mc);
+        } else {
+            encode_call_external(c->mc);
         }
     }
 }
 
-// Compile if statement node
-void compile_if_node(Compiler* compiler, ASTNode* node) {
-    if (compiler->output_mode == OUTPUT_C) {
-        write_indentation(compiler);
-        fprintf(compiler->output_file, "if (");
-
-        // Compile the condition
-        if (node->left != NULL) {
-            compile_expression(compiler, node->left);
+static void compile_var(Compiler* c, ASTNode* n, int spanish) {
+    if (!n || !n->value) return;
+    int is_str = 0;
+    
+    if (c->mode == OUT_C) {
+        indent(c);
+        if (n->left && (n->left->type == STRING_LITERAL_NODE ||
+            (n->left->type == IDENTIFIER_NODE && n->left->value[0]=='"'))) {
+            emit(c, "char* %s = %s;\n", n->value, n->left->value);
+            is_str = 1;
+        } else if (n->left) {
+            emit(c, "int %s = ", n->value);
+            compile_expr(c, n->left);
+            emit(c, ";\n");
+        } else {
+            emit(c, "int %s = 0;\n", n->value);
         }
-        fprintf(compiler->output_file, ") {\n");
-
-        compiler->indentation_level++;
-        if (node->right != NULL) {
-            // Process the if-then body
-            compile_ast_to_c_internal(compiler, node->right, 1); // 1 for inside function
+    }
+    else if (c->mode == OUT_ASM) {
+        int off = c->stack_off - 8;
+        emit(c, "    ; var %s\n", n->value);
+        if (n->left) {
+            compile_expr(c, n->left);
+            emit(c, "    mov [rbp%+d], rax\n", off);
+        } else {
+            emit(c, "    mov qword [rbp%+d], 0\n", off);
         }
-        compiler->indentation_level--;
+    }
+    else if (c->mc && n->left) {
+        compile_expr(c, n->left);
+        encode_mov_memory_from_rax(c->mc, c->stack_off - 8);
+    }
+    add_var(c, n->value, is_str);
+}
 
-        fprintf(compiler->output_file, "    }\n");
-    } else if (compiler->output_mode == OUTPUT_ASM) {
-        static int global_if_counter = 0;
-        int current_if = global_if_counter++;
-
-        append_to_buffer(compiler, "; If statement\n");
-
-        // Evaluate condition (assuming it results in a value in EAX)
-        if (node->left != NULL) {
-            compile_expression(compiler, node->left);
-            // Compare with 0 (if result != 0, condition is true)
-            append_to_buffer(compiler, "    cmp eax, 0\n");
-            append_to_buffer(compiler, "    je .Lelse_%d  ; Jump to else if condition is false\n", current_if);
-
-            // Process if-body
-            if (node->right != NULL) {
-                compile_ast_to_c_internal(compiler, node->right, 1); // 1 for inside function
-            }
-
-            append_to_buffer(compiler, "    jmp .Lend_%d   ; Jump to end\n", current_if);
-            append_to_buffer(compiler, ".Lelse_%d:\n", current_if);
-            append_to_buffer(compiler, ".Lend_%d:\n", current_if);
-        }
-    } else if (compiler->output_mode == OUTPUT_ELF) {
-        static int global_if_counter = 0;
-        int current_if = global_if_counter++;
-
-        if (compiler->machine_code && node->left != NULL) {
-            // Evaluate the condition expression (result should be in RAX)
-            compile_expression(compiler, node->left);
-
-            // Compare with 0: CMP RAX, 0
-            uint8_t cmp_code[] = {0x48, 0x83, 0xF8, 0x00}; // CMP RAX, 0
-            append_bytes(compiler->machine_code, cmp_code, 4);
-
-            // Conditional jump: JZ (Jump if Zero) to else part
-            uint8_t jz_code[] = {0x0F, 0x84, 0x00, 0x00, 0x00, 0x00}; // JZ rel32 (placeholder)
-            int jz_pos = compiler->machine_code->size;
-            append_bytes(compiler->machine_code, jz_code, 6);
-
-            // Process if-body (the code to execute if condition is true)
-            if (node->right != NULL) {
-                compile_ast_to_c_internal(compiler, node->right, 1); // 1 for inside function
-            }
-
-            // Calculate jump distance and patch the JZ instruction
-            // JZ instruction is at jz_pos, it's 6 bytes long, so next instruction is at jz_pos + 6
-            // We want to jump to compiler->machine_code->size (current position after if-body)
-            int32_t jz_target_offset = (compiler->machine_code->size) - (jz_pos + 6); // 6 is length of JZ instruction
-            memcpy(compiler->machine_code->code + jz_pos + 2, &jz_target_offset, 4);
-        }
+static void compile_assign(Compiler* c, ASTNode* n) {
+    if (!n || !n->value || !n->left) return;
+    
+    if (c->mode == OUT_C) {
+        indent(c);
+        emit(c, "%s = ", n->value);
+        compile_expr(c, n->left);
+        emit(c, ";\n");
+    }
+    else if (c->mode == OUT_ASM) {
+        int off = get_var_off(c, n->value);
+        compile_expr(c, n->left);
+        emit(c, "    mov [rbp%+d], rax\n", off);
+    }
+    else if (c->mc) {
+        int off = get_var_off(c, n->value);
+        compile_expr(c, n->left);
+        encode_mov_memory_from_rax(c->mc, off);
     }
 }
 
-// Compile while loop node
-void compile_while_node(Compiler* compiler, ASTNode* node) {
-    if (compiler->output_mode == OUTPUT_C) {
-        write_indentation(compiler);
-        fprintf(compiler->output_file, "while (");
-
-        // Compile the condition
-        if (node->left != NULL) {
-            compile_expression(compiler, node->left);
+static void compile_if(Compiler* c, ASTNode* n) {
+    static int lbl = 0;
+    int id = lbl++;
+    
+    if (c->mode == OUT_C) {
+        indent(c); emit(c, "if ("); compile_expr(c, n->left); emit(c, ") {\n");
+        c->indent++;
+        compile_node(c, n->right);
+        c->indent--;
+        indent(c); emit(c, "}");
+        if (n->extra) {
+            emit(c, " else {\n");
+            c->indent++;
+            compile_node(c, n->extra);
+            c->indent--;
+            indent(c); emit(c, "}");
         }
-        fprintf(compiler->output_file, ") {\n");
-
-        compiler->indentation_level++;
-        if (node->right != NULL) {
-            // Process the while-body
-            compile_ast_to_c_internal(compiler, node->right, 1); // 1 for inside function
-        }
-        compiler->indentation_level--;
-
-        fprintf(compiler->output_file, "    }\n");
-    } else if (compiler->output_mode == OUTPUT_ASM) {
-        static int global_while_counter = 0;
-        int current_while = global_while_counter++;
-
-        append_to_buffer(compiler, ".Lwhile_start_%d:\n", current_while);
-
-        // Evaluate condition (assuming it results in a value in EAX)
-        if (node->left != NULL) {
-            compile_expression(compiler, node->left);
-            // Compare with 0 (while result != 0, continue loop)
-            append_to_buffer(compiler, "    cmp eax, 0\n");
-            append_to_buffer(compiler, "    je .Lwhile_end_%d  ; Jump to end if condition is false\n", current_while);
-
-            // Process loop body
-            if (node->right != NULL) {
-                compile_ast_to_c_internal(compiler, node->right, 1); // 1 for inside function
-            }
-
-            // Jump back to start of loop
-            append_to_buffer(compiler, "    jmp .Lwhile_start_%d\n", current_while);
-            append_to_buffer(compiler, ".Lwhile_end_%d:\n", current_while);
-        }
-    } else if (compiler->output_mode == OUTPUT_ELF) {
-        static int global_while_counter = 0;
-        int current_while = global_while_counter++;
-
-        int loop_start_pos = compiler->machine_code->size; // Remember start position
-
-        if (compiler->machine_code && node->left != NULL) {
-            // Evaluate the condition expression (result should be in RAX)
-            compile_expression(compiler, node->left);
-
-            // Compare with 0: CMP RAX, 0
-            uint8_t cmp_code[] = {0x48, 0x83, 0xF8, 0x00}; // CMP RAX, 0
-            append_bytes(compiler->machine_code, cmp_code, 4);
-
-            // Conditional jump: JZ (Jump if Zero) to end of loop
-            uint8_t jz_code[] = {0x0F, 0x84, 0x00, 0x00, 0x00, 0x00}; // JZ rel32 (placeholder)
-            int jz_pos = compiler->machine_code->size;
-            append_bytes(compiler->machine_code, jz_code, 6);
-
-            // Process loop body
-            if (node->right != NULL) {
-                compile_ast_to_c_internal(compiler, node->right, 1); // 1 for inside function
-            }
-
-            // Jump back to start of loop
-            uint8_t jmp_back_code[] = {0xE9, 0x00, 0x00, 0x00, 0x00}; // JMP rel32 (placeholder)
-            int jmp_pos = compiler->machine_code->size;
-            append_bytes(compiler->machine_code, jmp_back_code, 5);
-
-            // Now calculate and patch the jump addresses
-            // JZ instruction jumps to the position after the JMP instruction
-            // JZ is at jz_pos, 6 bytes long, so next instruction would be at jz_pos + 6
-            // Target is the position after JMP: jmp_pos + 5
-            int32_t jz_target_offset = (jmp_pos + 5) - (jz_pos + 6); // Distance from after JZ to after JMP
-            // Patch the JZ instruction's operand (bytes 2-5)
-            memcpy(compiler->machine_code->code + jz_pos + 2, &jz_target_offset, 4);
-
-            // JMP instruction jumps back to the start of the loop
-            // JMP is at jmp_pos, 5 bytes long, so next instruction would be at jmp_pos + 5
-            // Target is loop_start_pos (beginning of loop condition evaluation)
-            int32_t jmp_target_offset = loop_start_pos - (jmp_pos + 5); // Distance from after JMP to loop start
-            // Patch the JMP instruction's operand (bytes 1-4)
-            memcpy(compiler->machine_code->code + jmp_pos + 1, &jmp_target_offset, 4);
-        }
+        emit(c, "\n");
+    }
+    else if (c->mode == OUT_ASM) {
+        compile_expr(c, n->left);
+        emit(c, "    cmp rax, 0\n    je .Lelse%d\n", id);
+        compile_node(c, n->right);
+        emit(c, "    jmp .Lend%d\n.Lelse%d:\n", id, id);
+        if (n->extra) compile_node(c, n->extra);
+        emit(c, ".Lend%d:\n", id);
+    }
+    else if (c->mc) {
+        compile_expr(c, n->left);
+        uint8_t cmp[] = {0x48,0x83,0xF8,0x00};
+        uint8_t jz[] = {0x0F,0x84,0,0,0,0};
+        append_bytes(c->mc, cmp, 4);
+        int jzpos = c->mc->size;
+        append_bytes(c->mc, jz, 6);
+        compile_node(c, n->right);
+        int32_t off = c->mc->size - (jzpos + 6);
+        memcpy(c->mc->code + jzpos + 2, &off, 4);
     }
 }
 
-// === MAIN COMPILATION ===
-void compile_ast_to_c(Compiler* c, ASTNode* program) {
-    if (c->output_mode == OUTPUT_C) {
-        fprintf(c->output_file, "int main() {\n");
-        c->indentation_level = 1;
-    } else if (c->output_mode == OUTPUT_ASM) {
-        append(c, "main:\n    push rbp\n    mov rbp, rsp\n");
-    } else if (c->output_mode == OUTPUT_ELF) {
-        encode_push_rbp(c->machine_code);
-        encode_mov_rbp_rsp(c->machine_code);
+static void compile_while(Compiler* c, ASTNode* n) {
+    static int lbl = 0;
+    int id = lbl++;
+    
+    if (c->mode == OUT_C) {
+        indent(c); emit(c, "while ("); compile_expr(c, n->left); emit(c, ") {\n");
+        c->indent++;
+        compile_node(c, n->right);
+        c->indent--;
+        indent(c); emit(c, "}\n");
     }
-
-    compile_statement_list(c, program);
-
-    if (c->output_mode == OUTPUT_C) {
-        fprintf(c->output_file, "    return 0;\n}\n");
-    } else if (c->output_mode == OUTPUT_ASM) {
-        append(c, "    mov rax, 0\n    pop rbp\n    ret\n");
-    } else if (c->output_mode == OUTPUT_ELF) {
-        encode_mov_rax_imm32(c->machine_code, 0);
-        encode_pop_rbp(c->machine_code);
-        encode_ret(c->machine_code);
+    else if (c->mode == OUT_ASM) {
+        emit(c, ".Lw%d:\n", id);
+        compile_expr(c, n->left);
+        emit(c, "    cmp rax,0\n    je .Lwe%d\n", id);
+        compile_node(c, n->right);
+        emit(c, "    jmp .Lw%d\n.Lwe%d:\n", id, id);
     }
-}
-
-void compile_statement_list(Compiler* c, ASTNode* node) {
-    ASTNode* stmt = node;
-    while (stmt) {
-        compile_ast_to_c_internal(c, stmt, 1);
-        stmt = stmt->right;
-    }
-}
-
-void compile_ast_to_c_internal(Compiler* c, ASTNode* node, int inside_function) {
-    if (!node) return;
-
-    switch (node->type) {
-        case FN_CALL_NODE:         compile_function_call_node(c, node); break;
-        case FN_DECL_NODE:         compile_function_decl_node(c, node); break;
-        case FN_DECL_SPANISH_NODE: compile_function_decl_node(c, node); break;  // Handle Spanish function declarations (cancion)
-        case VAR_DECL_NODE:        compile_var_decl_node(c, node, 1); break;
-        case ASSIGN_NODE:          compile_assignment_node(c, node); break;
-        case IF_NODE:              compile_if_node(c, node); break;
-        case IF_SPANISH_NODE:      compile_if_node(c, node); break;              // Handle Spanish if (si)
-        case WHILE_NODE:           compile_while_node(c, node); break;
-        case WHILE_SPANISH_NODE:   compile_while_node(c, node); break;          // Handle Spanish while (mientras)
-        default: break;
+    else if (c->mc) {
+        int start = c->mc->size;
+        compile_expr(c, n->left);
+        uint8_t cmp[] = {0x48,0x83,0xF8,0x00};
+        uint8_t jz[] = {0x0F,0x84,0,0,0,0};
+        append_bytes(c->mc, cmp, 4);
+        int jzpos = c->mc->size;
+        append_bytes(c->mc, jz, 6);
+        compile_node(c, n->right);
+        uint8_t jmp[] = {0xE9,0,0,0,0};
+        int jmppos = c->mc->size;
+        append_bytes(c->mc, jmp, 5);
+        int32_t off1 = (jmppos+5) - (jzpos+6);
+        int32_t off2 = start - (jmppos+5);
+        memcpy(c->mc->code + jzpos + 2, &off1, 4);
+        memcpy(c->mc->code + jmppos + 1, &off2, 4);
     }
 }
 
-// === IMPLEMENTATIONS (the ones that were missing) ===
-void compile_function_call_node(Compiler* c, ASTNode* node) {
-    write_indent(c);
-    const char* name = node->value;
-
-    if (c->output_mode == OUTPUT_C) {
-        if (strcmp(name, "println") == 0 || strcmp(name, "print") == 0) {
-            int ln = strcmp(name, "println") == 0;
-            if (node->left && node->left->type == NUMBER_NODE) {
-                fprintf(c->output_file, "builtin_print%s_num(%s);\n", ln ? "ln" : "", node->left->value);
-            } else if (node->left && node->left->type == IDENTIFIER_NODE &&
-                       node->left->value[0] == '"' && node->left->value[strlen(node->left->value)-1] == '"') {
-                fprintf(c->output_file, "builtin_print%s(%s);\n", ln ? "ln" : "", node->left->value);
-            } else {
-                fprintf(c->output_file, "builtin_print%s(\"\\n\");\n", ln ? "ln" : "");
-            }
-        } else if (strstr(name, "bolivar") || strstr(name, "narino") || strstr(name, "cano") ||
-                   strstr(name, "gaitan") || strstr(name, "garcia")) {
-            fprintf(c->output_file, "builtin_%s();\n", name);
+static void compile_for(Compiler* c, ASTNode* n) {
+    static int lbl = 0;
+    int id = lbl++;
+    
+    if (c->mode == OUT_C) {
+        indent(c); emit(c, "for (");
+        if (n->left) compile_expr(c, n->left);
+        emit(c, "; ");
+        if (n->extra && n->extra->left) compile_expr(c, n->extra->left);
+        emit(c, "; ");
+        if (n->extra && n->extra->right) compile_expr(c, n->extra->right);
+        emit(c, ") {\n");
+        c->indent++;
+        compile_node(c, n->right);
+        c->indent--;
+        indent(c); emit(c, "}\n");
+    }
+    else if (c->mode == OUT_ASM) {
+        if (n->left) compile_node(c, n->left);
+        emit(c, ".Lf%d:\n", id);
+        if (n->extra && n->extra->left) {
+            compile_expr(c, n->extra->left);
+            emit(c, "    cmp rax,0\n    je .Lfe%d\n", id);
         }
-    } else if (c->output_mode == OUTPUT_ASM) {
-        if (strcmp(name, "println") == 0) {
-            if (node->left && node->left->type == NUMBER_NODE) {
-                append(c, "    mov rdi, fmt_num\n");
-                append(c, "    mov rsi, %s\n", node->left->value);
-            } else {
-                char* label = create_string_label(c, node->left ? node->left->value : "\"\"");
-                append(c, "    mov rdi, fmt_str\n");
-                append(c, "    mov rsi, %s\n", label);
-            }
-            append(c, "    xor rax, rax\n    call printf\n");
-        }
-        // Add other builtins as needed
-    } else if (c->output_mode == OUTPUT_ELF) {
-        // For ELF mode, we need to handle function calls with proper calling convention
-        if (c->machine_code) {
-            if (strcmp(name, "println") == 0 || strcmp(name, "print") == 0) {
-                // Prepare parameters for printf call using System V ABI calling convention
-                if (node->left && node->left->type == NUMBER_NODE) {
-                    // Call printf with number format: printf("%d\n", number)
-                    // First, we need to push the current registers to preserve them
-                    // For now, assume we only need to set up RDI and RSI
-                    encode_mov_rdi_imm64(c->machine_code, 0); // Placeholder for format string address
-                    encode_mov_rsi_imm32(c->machine_code, atoi(node->left->value)); // Load the number as second arg
-                    encode_call_external(c->machine_code); // Call printf - we'll handle relocation later
-                } else if (node->left && node->left->type == IDENTIFIER_NODE) {
-                    if (node->left->value[0] == '"' && node->left->value[strlen(node->left->value)-1] == '"') {
-                        // String literal - for now, just pass it as first argument to printf
-                        encode_mov_rdi_imm64(c->machine_code, 0); // Placeholder for string address
-                        encode_call_external(c->machine_code); // Call printf
-                    } else {
-                        // Variable - need to load the variable's value
-                        int var_offset = get_variable_offset(c, node->left->value);
-                        if (var_offset != -1) {
-                            // Load variable value into RDI (first argument)
-                            encode_mov_rax_from_memory(c->machine_code, var_offset);
-                            encode_mov_rdi_from_rax(c->machine_code); // Move to first argument register
-                        } else {
-                            // Variable not found, load 0
-                            encode_mov_rdi_imm64(c->machine_code, 0);
-                        }
-                        encode_call_external(c->machine_code); // Call printf
-                    }
-                } else if (node->left) {
-                    // For expression arguments - compile to RAX then move to RDI
-                    compile_expression_to_register(c, node->left, RAX_REG);
-                    encode_mov_rdi_from_rax(c->machine_code); // Move result to first argument
-                    encode_call_external(c->machine_code);
-                } else {
-                    // No argument - just call with format string for newline
-                    encode_mov_rdi_imm64(c->machine_code, 0); // Placeholder for newline format
-                    encode_call_external(c->machine_code);
-                }
-            } else if (strstr(name, "bolivar") || strstr(name, "narino") || strstr(name, "cano") ||
-                       strstr(name, "gaitan") || strstr(name, "garcia")) {
-                // For builtin functions like bolivar, etc.
-                // These take no parameters, so just call directly
-                encode_call_external(c->machine_code); // Call the builtin function
-            }
-        }
+        compile_node(c, n->right);
+        if (n->extra && n->extra->right) compile_node(c, n->extra->right);
+        emit(c, "    jmp .Lf%d\n.Lfe%d:\n", id, id);
     }
 }
 
-
-// Add compile_if_node, compile_while_node, etc. as you expand the language
-
-// Function to compile an expression directly to the output file
-void compile_expression(Compiler* compiler, ASTNode* node) {
-    if (node == NULL) return;
-
-    switch (node->type) {
-        case NUMBER_NODE:
-            if (compiler->output_mode == OUTPUT_C) {
-                fprintf(compiler->output_file, "%s", node->value);
-            } else if (compiler->output_mode == OUTPUT_ASM) {
-                // In assembly context, just return the number value
-                // This is more complex for actual expression evaluation in assembly
-                // For now we'll add it to buffer
-                append_to_buffer(compiler, "%s", node->value);
-            } else if (compiler->output_mode == OUTPUT_ELF) {
-                // For ELF mode, we need to move the immediate value to RAX
-                if (compiler->machine_code) {
-                    int32_t value = atoi(node->value);
-                    encode_mov_rax_imm32(compiler->machine_code, value);
-                }
-            }
-            break;
-
-        case IDENTIFIER_NODE:
-            // For identifiers, check if they are string literals (have quotes)
-            if (node->value[0] == '"' && node->value[strlen(node->value)-1] == '"') {
-                if (compiler->output_mode == OUTPUT_C) {
-                    fprintf(compiler->output_file, "%s", node->value);  // String literal
-                } else if (compiler->output_mode == OUTPUT_ASM) {
-                    char* label = create_string_label(compiler, node->value);
-                    append_to_buffer(compiler, "%s", label);  // Use the label
-                } else if (compiler->output_mode == OUTPUT_ELF) {
-                    // For string literals in ELF mode, we would need to load their address
-                    // This would require complex string handling - for now, just a placeholder
-                    append_to_buffer(compiler, "; String literal expression not fully implemented\n");
-                }
-            } else {
-                if (compiler->output_mode == OUTPUT_C) {
-                    fprintf(compiler->output_file, "%s", node->value);  // Variable name
-                } else if (compiler->output_mode == OUTPUT_ASM) {
-                    append_to_buffer(compiler, "%s", node->value);  // Variable name
-                } else if (compiler->output_mode == OUTPUT_ELF) {
-                    // For variable lookup in ELF mode, we need to load from memory
-                    // We need to find where the variable is stored and load it to RAX
-                    // For now, we'll assume it's stored at some offset from RBP
-                    // This would require variable tracking in the compiler structure
-                    int var_offset = -8; // Placeholder - in real implementation would track actual variable locations
-                    if (compiler->machine_code) {
-                        encode_mov_rax_from_memory(compiler->machine_code, var_offset);
-                    }
-                }
-            }
-            break;
-
-        case BINARY_OP_NODE:
-            // Handle binary operations like +, -, *, /
-            if (compiler->output_mode == OUTPUT_C) {
-                fprintf(compiler->output_file, "(");
-                compile_expression(compiler, node->left);
-                fprintf(compiler->output_file, " %s ", node->value ? node->value : "");
-                compile_expression(compiler, node->right);
-                fprintf(compiler->output_file, ")");
-            } else if (compiler->output_mode == OUTPUT_ASM) {
-                // For assembly, generate actual calculation code
-                // Load left operand to EAX
-                if (node->left && node->left->type == NUMBER_NODE) {
-                    append_to_buffer(compiler, "    mov eax, %s  ; Load left operand\n", node->left->value);
-                } else if (node->left && node->left->type == IDENTIFIER_NODE) {
-                    // For now, assuming variables are stored at [rbp-8], [rbp-16], etc.
-                    append_to_buffer(compiler, "    mov eax, DWORD PTR [rbp-8]  ; Load left operand: %s\n", node->left->value);
-                }
-
-                // Load right operand to EBX
-                if (node->right && node->right->type == NUMBER_NODE) {
-                    append_to_buffer(compiler, "    mov ebx, %s  ; Load right operand\n", node->right->value);
-                } else if (node->right && node->right->type == IDENTIFIER_NODE) {
-                    append_to_buffer(compiler, "    mov ebx, DWORD PTR [rbp-16]  ; Load right operand: %s\n", node->right->value);
-                }
-
-                // Perform the operation
-                if (node->value && strcmp(node->value, "+") == 0) {
-                    append_to_buffer(compiler, "    add eax, ebx  ; Perform addition\n");
-                } else if (node->value && strcmp(node->value, "-") == 0) {
-                    append_to_buffer(compiler, "    sub eax, ebx  ; Perform subtraction\n");
-                } else if (node->value && strcmp(node->value, "*") == 0) {
-                    append_to_buffer(compiler, "    imul eax, ebx  ; Perform multiplication\n");
-                } else if (node->value && strcmp(node->value, "/") == 0) {
-                    append_to_buffer(compiler, "    cdq            ; Sign-extend EAX into EDX\n");
-                    append_to_buffer(compiler, "    idiv ebx       ; Perform division\n");
-                } else if (node->value && strcmp(node->value, ">") == 0) {
-                    append_to_buffer(compiler, "    cmp eax, ebx   ; Compare left > right\n");
-                    append_to_buffer(compiler, "    setg al        ; Set AL to 1 if greater, 0 otherwise\n");
-                    append_to_buffer(compiler, "    movzx eax, al  ; Zero-extend AL to EAX\n");
-                } else if (node->value && strcmp(node->value, "<") == 0) {
-                    append_to_buffer(compiler, "    cmp eax, ebx   ; Compare left < right\n");
-                    append_to_buffer(compiler, "    setl al        ; Set AL to 1 if less, 0 otherwise\n");
-                    append_to_buffer(compiler, "    movzx eax, al  ; Zero-extend AL to EAX\n");
-                } else if (node->value && strcmp(node->value, ">=") == 0) {
-                    append_to_buffer(compiler, "    cmp eax, ebx   ; Compare left >= right\n");
-                    append_to_buffer(compiler, "    setge al       ; Set AL to 1 if greater or equal, 0 otherwise\n");
-                    append_to_buffer(compiler, "    movzx eax, al  ; Zero-extend AL to EAX\n");
-                } else if (node->value && strcmp(node->value, "<=") == 0) {
-                    append_to_buffer(compiler, "    cmp eax, ebx   ; Compare left <= right\n");
-                    append_to_buffer(compiler, "    setle al       ; Set AL to 1 if less or equal, 0 otherwise\n");
-                    append_to_buffer(compiler, "    movzx eax, al  ; Zero-extend AL to EAX\n");
-                } else if (node->value && strcmp(node->value, "==") == 0) {
-                    append_to_buffer(compiler, "    cmp eax, ebx   ; Compare left == right\n");
-                    append_to_buffer(compiler, "    sete al        ; Set AL to 1 if equal, 0 otherwise\n");
-                    append_to_buffer(compiler, "    movzx eax, al  ; Zero-extend AL to EAX\n");
-                } else if (node->value && strcmp(node->value, "!=") == 0) {
-                    append_to_buffer(compiler, "    cmp eax, ebx   ; Compare left != right\n");
-                    append_to_buffer(compiler, "    setne al       ; Set AL to 1 if not equal, 0 otherwise\n");
-                    append_to_buffer(compiler, "    movzx eax, al  ; Zero-extend AL to EAX\n");
-                }
-            } else if (compiler->output_mode == OUTPUT_ELF) {
-                // For ELF mode, generate machine code for binary operations
-                if (compiler->machine_code) {
-                    // Use our improved expression evaluation with proper register allocation
-                    if (node->left && node->right) {
-                        // Evaluate left operand into RCX (temporary register), right into RAX
-                        compile_expression_to_register(compiler, node->left, RCX_REG);  // Left in RCX
-                        encode_mov_rbx_from_rcx(compiler->machine_code);               // Move left to RBX
-                        compile_expression_to_register(compiler, node->right, RAX_REG); // Right in RAX
-
-                        // Now RBX has left operand, RAX has right operand
-                        if (node->value && strcmp(node->value, "+") == 0) {
-                            encode_add_rax_rbx(compiler->machine_code);
-                        } else if (node->value && strcmp(node->value, "-") == 0) {
-                            encode_sub_rax_rbx(compiler->machine_code);
-                        } else if (node->value && strcmp(node->value, "*") == 0) {
-                            encode_mul_rbx(compiler->machine_code);
-                        } else if (node->value && strcmp(node->value, "/") == 0) {
-                            encode_div_rbx(compiler->machine_code);
-                        } else if (node->value && strcmp(node->value, ">") == 0) {
-                            // For "left > right", we compare left (RBX) > right (RAX)
-                            // Actually, our values are RAX = right, RBX = left
-                            // So to check left > right, we do: CMP RBX, RAX (compare left, right)
-                            // If RBX > RAX (left > right), set result
-                            encode_mov_rcx_from_rax(compiler->machine_code); // Save right in RCX
-                            encode_mov_rax_from_rbx(compiler->machine_code); // Move left to RAX
-                            encode_mov_rbx_from_rcx(compiler->machine_code); // Move right to RBX
-                            // Now RAX = left, RBX = right, for "left > right" we want SETG
-                            uint8_t cmp_code[] = {0x48, 0x39, 0xD8}; // CMP RAX, RBX (left > right)
-                            append_bytes(compiler->machine_code, cmp_code, 3);
-
-                            // Set AL to 1 if RAX > RBX (left > right), otherwise 0
-                            uint8_t setg_code[] = {0x0F, 0x9F, 0xC0}; // SETG AL
-                            append_bytes(compiler->machine_code, setg_code, 3);
-
-                            // Zero-extend AL to RAX
-                            uint8_t movzx_code[] = {0x48, 0x0F, 0xB6, 0xC0}; // MOVZX RAX, AL
-                            append_bytes(compiler->machine_code, movzx_code, 4);
-                        } else if (node->value && strcmp(node->value, "<") == 0) {
-                            // Similar logic: RAX = left, RBX = right for "left < right"
-                            encode_mov_rcx_from_rax(compiler->machine_code); // Save right in RCX
-                            encode_mov_rax_from_rbx(compiler->machine_code); // Move left to RAX
-                            encode_mov_rbx_from_rcx(compiler->machine_code); // Move right to RBX
-                            uint8_t cmp_code[] = {0x48, 0x39, 0xD8}; // CMP RAX, RBX (left < right)
-                            append_bytes(compiler->machine_code, cmp_code, 3);
-
-                            // Set AL to 1 if RAX < RBX (left < right), otherwise 0 - Actually SETL needs operands swapped
-                            // For left < right: left < right means right > left, so: SETL when RAX (left) < RBX (right)
-                            uint8_t setl_code[] = {0x0F, 0x9C, 0xC0}; // SETL AL
-                            append_bytes(compiler->machine_code, setl_code, 3);
-
-                            // Zero-extend AL to RAX
-                            uint8_t movzx_code[] = {0x48, 0x0F, 0xB6, 0xC0}; // MOVZX RAX, AL
-                            append_bytes(compiler->machine_code, movzx_code, 4);
-                        } else if (node->value && strcmp(node->value, ">=") == 0) {
-                            encode_mov_rcx_from_rax(compiler->machine_code); // Save right in RCX
-                            encode_mov_rax_from_rbx(compiler->machine_code); // Move left to RAX
-                            encode_mov_rbx_from_rcx(compiler->machine_code); // Move right to RBX
-                            uint8_t cmp_code[] = {0x48, 0x39, 0xD8}; // CMP RAX, RBX (left >= right)
-                            append_bytes(compiler->machine_code, cmp_code, 3);
-
-                            // Set AL to 1 if RAX >= RBX (left >= right), otherwise 0
-                            uint8_t setge_code[] = {0x0F, 0x9D, 0xC0}; // SETGE AL
-                            append_bytes(compiler->machine_code, setge_code, 3);
-
-                            // Zero-extend AL to RAX
-                            uint8_t movzx_code[] = {0x48, 0x0F, 0xB6, 0xC0}; // MOVZX RAX, AL
-                            append_bytes(compiler->machine_code, movzx_code, 4);
-                        } else if (node->value && strcmp(node->value, "<=") == 0) {
-                            encode_mov_rcx_from_rax(compiler->machine_code); // Save right in RCX
-                            encode_mov_rax_from_rbx(compiler->machine_code); // Move left to RAX
-                            encode_mov_rbx_from_rcx(compiler->machine_code); // Move right to RBX
-                            uint8_t cmp_code[] = {0x48, 0x39, 0xD8}; // CMP RAX, RBX (left <= right)
-                            append_bytes(compiler->machine_code, cmp_code, 3);
-
-                            // Set AL to 1 if RAX <= RBX (left <= right), otherwise 0
-                            uint8_t setle_code[] = {0x0F, 0x9E, 0xC0}; // SETLE AL
-                            append_bytes(compiler->machine_code, setle_code, 3);
-
-                            // Zero-extend AL to RAX
-                            uint8_t movzx_code[] = {0x48, 0x0F, 0xB6, 0xC0}; // MOVZX RAX, AL
-                            append_bytes(compiler->machine_code, movzx_code, 4);
-                        } else if (node->value && strcmp(node->value, "==") == 0) {
-                            encode_mov_rcx_from_rax(compiler->machine_code); // Save right in RCX
-                            encode_mov_rax_from_rbx(compiler->machine_code); // Move left to RAX
-                            encode_mov_rbx_from_rcx(compiler->machine_code); // Move right to RBX
-                            uint8_t cmp_code[] = {0x48, 0x39, 0xD8}; // CMP RAX, RBX (left == right)
-                            append_bytes(compiler->machine_code, cmp_code, 3);
-
-                            // Set AL to 1 if RAX == RBX (left == right), otherwise 0
-                            uint8_t sete_code[] = {0x0F, 0x94, 0xC0}; // SETE AL
-                            append_bytes(compiler->machine_code, sete_code, 3);
-
-                            // Zero-extend AL to RAX
-                            uint8_t movzx_code[] = {0x48, 0x0F, 0xB6, 0xC0}; // MOVZX RAX, AL
-                            append_bytes(compiler->machine_code, movzx_code, 4);
-                        } else if (node->value && strcmp(node->value, "!=") == 0) {
-                            encode_mov_rcx_from_rax(compiler->machine_code); // Save right in RCX
-                            encode_mov_rax_from_rbx(compiler->machine_code); // Move left to RAX
-                            encode_mov_rbx_from_rcx(compiler->machine_code); // Move right to RBX
-                            uint8_t cmp_code[] = {0x48, 0x39, 0xD8}; // CMP RAX, RBX (left != right)
-                            append_bytes(compiler->machine_code, cmp_code, 3);
-
-                            // Set AL to 1 if RAX != RBX (left != right), otherwise 0
-                            uint8_t setne_code[] = {0x0F, 0x95, 0xC0}; // SETNE AL
-                            append_bytes(compiler->machine_code, setne_code, 3);
-
-                            // Zero-extend AL to RAX
-                            uint8_t movzx_code[] = {0x48, 0x0F, 0xB6, 0xC0}; // MOVZX RAX, AL
-                            append_bytes(compiler->machine_code, movzx_code, 4);
-                        } else {
-                            // Unknown operator, just return left operand value
-                            encode_mov_rax_from_rbx(compiler->machine_code);  // Move left (RBX) to result (RAX)
-                        }
-                    } else {
-                        // If one operand is missing, load 0 as result
-                        encode_mov_rax_imm32(compiler->machine_code, 0);
-                    }
-                }
-            }
-            break;
-
-        case UNARY_OP_NODE:
-            // Handle unary operations like "no" (not)
-            if (compiler->output_mode == OUTPUT_C) {
-                fprintf(compiler->output_file, "%s ", node->value ? node->value : "");
-                compile_expression(compiler, node->right);
-            } else if (compiler->output_mode == OUTPUT_ASM) {
-                append_to_buffer(compiler, "%s %s", node->value ? node->value : "",
-                    node->right ? node->right->value : "unknown");
-            } else if (compiler->output_mode == OUTPUT_ELF) {
-                // For unary operations in ELF mode
-                if (compiler->machine_code) {
-                    if (node->value && strcmp(node->value, "no") == 0) {
-                        // For "no" (not) operation, perform logical NOT
-                        // This is a complex operation that would require proper handling
-                        // For now, just compile the operand
-                        compile_expression(compiler, node->right);
-                        // Apply logical NOT (NOT RAX)
-                        uint8_t not_rax[] = {0x48, 0xF7, 0xD0}; // NOT RAX
-                        append_bytes(compiler->machine_code, not_rax, 3);
-                    } else {
-                        // Compile the operand without unary operation
-                        compile_expression(compiler, node->right);
-                    }
-                }
-            }
-            break;
-
-        default:
-            if (compiler->output_mode == OUTPUT_C) {
-                fprintf(compiler->output_file, "/* unknown expression */");
-            } else if (compiler->output_mode == OUTPUT_ASM) {
-                append_to_buffer(compiler, "/* unknown expression */");
-            } else if (compiler->output_mode == OUTPUT_ELF) {
-                if (compiler->machine_code) {
-                    // For unknown expressions in ELF mode, load 0 to RAX
-                    encode_mov_rax_imm32(compiler->machine_code, 0);
-                }
-            }
-            break;
+static void compile_return(Compiler* c, ASTNode* n) {
+    if (c->mode == OUT_C) {
+        indent(c); emit(c, "return ");
+        if (n->left) compile_expr(c, n->left);
+        else emit(c, "0");
+        emit(c, ";\n");
+    }
+    else if (c->mode == OUT_ASM) {
+        if (n->left) compile_expr(c, n->left);
+        else emit(c, "    xor rax,rax\n");
+        emit(c, "    leave\n    ret\n");
+    }
+    else if (c->mc) {
+        if (n->left) compile_expr(c, n->left);
+        else encode_mov_rax_imm32(c->mc, 0);
+        encode_pop_rbp(c->mc);
+        encode_ret(c->mc);
     }
 }
 
-
-// Static counter to prevent infinite recursion in AST traversal
-static int recursion_depth = 0;
-#define MAX_RECURSION_DEPTH 1000
-
-
-
-int compile_viva_to_c(const char* viva_code, const char* c_output_file) {
-    // First tokenize and parse the Viva code
-    TokenStream* tokens = tokenize(viva_code);
-    ASTNode* ast = parse_program(tokens);
-
-    // Initialize the compiler
-    Compiler* compiler = init_compiler(c_output_file, OUTPUT_C);
-    if (compiler == NULL) {
-        free_token_stream(tokens);
-        free_ast_node(ast);
-        return -1;
+static void compile_func(Compiler* c, ASTNode* n) {
+    const char* name = n->value ? n->value : "func";
+    
+    if (c->mode == OUT_C) {
+        emit(c, "int %s() {\n", name);
+        c->indent++;
+        compile_node(c, n->right);
+        c->indent--;
+        emit(c, "    return 0;\n}\n\n");
     }
-
-    // Generate C code from the AST
-    if (ast != NULL) {
-        compile_ast_to_c(compiler, ast);
+    else if (c->mode == OUT_ASM) {
+        emit(c, "%s:\n    push rbp\n    mov rbp,rsp\n    sub rsp,256\n", name);
+        compile_node(c, n->right);
+        emit(c, "    xor rax,rax\n    leave\n    ret\n");
     }
+    else if (c->mc) {
+        encode_push_rbp(c->mc);
+        encode_mov_rbp_rsp(c->mc);
+        compile_node(c, n->right);
+        encode_mov_rax_imm32(c->mc, 0);
+        encode_pop_rbp(c->mc);
+        encode_ret(c->mc);
+    }
+}
 
-    // Clean up
-    free_compiler(compiler);
-    free_token_stream(tokens);
+static void compile_node(Compiler* c, ASTNode* n) {
+    while (n) {
+        switch (n->type) {
+            case PROGRAM_NODE: compile_node(c, n->left); break;
+            case FN_CALL_NODE: compile_call(c, n); break;
+            case FN_DECL_NODE: case FN_DECL_SPANISH_NODE: compile_func(c, n); break;
+            case VAR_DECL_NODE: compile_var(c, n, 0); break;
+            case VAR_DECL_SPANISH_NODE: compile_var(c, n, 1); break;
+            case ASSIGN_NODE: compile_assign(c, n); break;
+            case IF_NODE: case IF_SPANISH_NODE: compile_if(c, n); break;
+            case WHILE_NODE: case WHILE_SPANISH_NODE: compile_while(c, n); break;
+            case FOR_NODE: case FOR_SPANISH_NODE: compile_for(c, n); break;
+            case RETURN_NODE: compile_return(c, n); break;
+            default: break;
+        }
+        n = n->right;
+    }
+}
+
+static void compile_main(Compiler* c, ASTNode* ast) {
+    if (c->mode == OUT_C) {
+        emit(c, "int main() {\n");
+        c->indent = 1;
+    } else if (c->mode == OUT_ASM) {
+        emit(c, "main:\n    push rbp\n    mov rbp,rsp\n    sub rsp,256\n");
+    } else if (c->mc) {
+        encode_push_rbp(c->mc);
+        encode_mov_rbp_rsp(c->mc);
+    }
+    
+    compile_node(c, ast);
+    
+    if (c->mode == OUT_C) {
+        emit(c, "    return 0;\n}\n");
+    } else if (c->mode == OUT_ASM) {
+        emit(c, "    xor rax,rax\n    leave\n    ret\n");
+    } else if (c->mc) {
+        encode_mov_rax_imm32(c->mc, 0);
+        encode_pop_rbp(c->mc);
+        encode_ret(c->mc);
+    }
+}
+
+// Public API functions
+int compile_viva_to_c(const char* code, const char* outfile) {
+    TokenStream* t = tokenize(code);
+    ASTNode* ast = parse_program(t);
+    Compiler* c = init_compiler(outfile, OUT_C);
+    if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
+    if (ast) compile_main(c, ast);
+    finish_compiler(c);
+    free_token_stream(t);
     free_ast_node(ast);
-
     return 0;
 }
 
-int compile_viva_to_asm(const char* viva_code, const char* asm_output_file) {
-    // First tokenize and parse the Viva code
-    TokenStream* tokens = tokenize(viva_code);
-    ASTNode* ast = parse_program(tokens);
-
-    // Initialize the compiler for assembly output
-    Compiler* compiler = init_compiler(asm_output_file, OUTPUT_ASM);
-    if (compiler == NULL) {
-        free_token_stream(tokens);
-        free_ast_node(ast);
-        return -1;
-    }
-
-    // Generate assembly code from the AST
-    if (ast != NULL) {
-        compile_ast_to_c(compiler, ast);
-    }
-
-    // Clean up
-    free_compiler(compiler);
-    free_token_stream(tokens);
+int compile_viva_to_asm(const char* code, const char* outfile) {
+    TokenStream* t = tokenize(code);
+    ASTNode* ast = parse_program(t);
+    Compiler* c = init_compiler(outfile, OUT_ASM);
+    if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
+    if (ast) compile_main(c, ast);
+    finish_compiler(c);
+    free_token_stream(t);
     free_ast_node(ast);
-
     return 0;
 }
 
-int compile_viva_to_elf(const char* viva_code, const char* elf_output_file) {
-    // First tokenize and parse the Viva code
-    TokenStream* tokens = tokenize(viva_code);
-    ASTNode* ast = parse_program(tokens);
-
-    // Initialize the compiler for ELF output (Linux default)
-    Compiler* compiler = init_compiler(elf_output_file, OUTPUT_ELF);
-    if (compiler == NULL) {
-        free_token_stream(tokens);
-        free_ast_node(ast);
-        return -1;
-    }
-
-    // Set platform to Linux (default for ELF)
-    compiler->platform_target = PLATFORM_LINUX;
-
-    // Generate ELF object code from the AST
-    if (ast != NULL) {
-        compile_ast_to_c(compiler, ast);
-    }
-
-    // Clean up
-    free_compiler(compiler);
-    free_token_stream(tokens);
+int compile_viva_to_elf(const char* code, const char* outfile) {
+    TokenStream* t = tokenize(code);
+    ASTNode* ast = parse_program(t);
+    Compiler* c = init_compiler(outfile, OUT_ELF);
+    if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
+    c->plat = PLATFORM_LINUX;
+    if (ast) compile_main(c, ast);
+    finish_compiler(c);
+    free_token_stream(t);
     free_ast_node(ast);
-
     return 0;
 }
 
-int compile_viva_to_platform(const char* viva_code, const char* output_file, PlatformTarget platform) {
-    // First tokenize and parse the Viva code
-    TokenStream* tokens = tokenize(viva_code);
-    ASTNode* ast = parse_program(tokens);
-
-    // Initialize the compiler for machine code output
-    Compiler* compiler = init_compiler(output_file, OUTPUT_ELF);
-    if (compiler == NULL) {
-        free_token_stream(tokens);
-        free_ast_node(ast);
-        return -1;
-    }
-
-    // Set the specific platform target
-    compiler->platform_target = platform;
-
-    // Generate platform-specific object code from the AST
-    if (ast != NULL) {
-        compile_ast_to_c(compiler, ast);
-    }
-
-    // Clean up
-    free_compiler(compiler);
-    free_token_stream(tokens);
+int compile_viva_to_platform(const char* code, const char* outfile, PlatformTarget plat) {
+    TokenStream* t = tokenize(code);
+    ASTNode* ast = parse_program(t);
+    Compiler* c = init_compiler(outfile, OUT_ELF);
+    if (!c) { free_token_stream(t); free_ast_node(ast); return -1; }
+    c->plat = plat;
+    if (ast) compile_main(c, ast);
+    finish_compiler(c);
+    free_token_stream(t);
     free_ast_node(ast);
-
-    return 0;
-}
-
-void generate_elf_file(Compiler* compiler) {
-    if (compiler->output_mode != OUTPUT_ELF) return;
-
-    // Create proper ELF file structure
-    ELFFile* elf = init_elf_file();
-    if (!elf) return;
-
-    // Create text section with machine code
-    if (compiler->machine_code && compiler->machine_code->size > 0) {
-        create_text_section(elf, compiler->machine_code);
-    } else {
-        // If no machine code was generated during compilation, create a minimal function
-        MachineCode* mc = init_machine_code();
-        encode_push_rbp(mc);
-        encode_mov_rbp_rsp(mc);
-        encode_mov_rax_imm32(mc, 0);  // Return 0
-        encode_pop_rbp(mc);
-        encode_ret(mc);
-
-        create_text_section(elf, mc);
-        free_machine_code(mc);
-    }
-
-    // Add symbol table and string table
-    create_symbol_table(elf);
-
-    // Create the complete ELF file
-    write_complete_elf_file(elf, compiler->output_filename);
-
-    // Clean up
-    free_elf_file(elf);
-}
-
-// Machine code generation for ELF output
-MachineCode* init_machine_code() {
-    MachineCode* mc = malloc(sizeof(MachineCode));
-    mc->capacity = 4096;
-    mc->size = 0;
-    mc->code = malloc(mc->capacity);
-    mc->reloc_count = 0;
-    mc->reloc_capacity = 16;  // Start with space for 16 relocations
-    mc->relocations = malloc(mc->reloc_capacity * sizeof(Elf64_Rela));
-    return mc;
-}
-
-void free_machine_code(MachineCode* mc) {
-    if (mc) {
-        free(mc->code);
-        if (mc->relocations) {
-            free(mc->relocations);
-        }
-        free(mc);
-    }
-}
-
-int append_bytes(MachineCode* mc, const uint8_t* bytes, size_t len) {
-    // Check if we need to resize the buffer
-    while (mc->size + len > mc->capacity) {
-        // Double the capacity
-        size_t new_capacity = mc->capacity * 2;
-        uint8_t* new_code = realloc(mc->code, new_capacity);
-        if (new_code == NULL) {
-            return -1; // Failed to allocate more memory
-        }
-        mc->code = new_code;
-        mc->capacity = new_capacity;
-    }
-
-    memcpy(mc->code + mc->size, bytes, len);
-    mc->size += len;
-    return 0;
-}
-
-// More comprehensive x86-64 instruction encoder
-int encode_push_rbp(MachineCode* mc) {
-    uint8_t code[] = {0x55};
-    return append_bytes(mc, code, 1);
-}
-
-int encode_mov_rbp_rsp(MachineCode* mc) {
-    uint8_t code[] = {0x48, 0x89, 0xE5};
-    return append_bytes(mc, code, 3);
-}
-
-int encode_mov_rax_imm32(MachineCode* mc, int32_t value) {
-    uint8_t code[10];  // B8 + imm32 (4 bytes) + sign extension to 64-bit
-    code[0] = 0x48;  // REX.W prefix for 64-bit operation
-    code[1] = 0xB8;  // MOV RAX, imm32 (sign-extended to 64-bit)
-    // Immediate value in little-endian
-    *(int32_t*)(code + 2) = value;
-    return append_bytes(mc, code, 6);
-}
-
-int encode_pop_rbp(MachineCode* mc) {
-    uint8_t code[] = {0x5D};
-    return append_bytes(mc, code, 1);
-}
-
-int encode_ret(MachineCode* mc) {
-    uint8_t code[] = {0xC3};
-    return append_bytes(mc, code, 1);
-}
-
-int encode_mov_rdi_imm64(MachineCode* mc, uint64_t value) {
-    // MOV RDI, imm64 (sign-extended 32-bit)
-    uint8_t code[10];  // BF + imm32 (4 bytes) + sign extension to 64-bit
-    code[0] = 0x48;  // REX.W prefix for 64-bit operation
-    code[1] = 0xBF;  // MOV RDI, imm32 (sign-extended to 64-bit)
-    // Immediate value in little-endian
-    *(int32_t*)(code + 2) = (int32_t)value;  // Truncate to 32-bit for now
-    return append_bytes(mc, code, 6);
-}
-
-int encode_mov_rbp_rdi(MachineCode* mc) {  // For function parameters
-    // Placeholder - this would load a parameter into RDI register
-    // MOV RDI, [RBP+N] or similar - this is a placeholder
-    uint8_t code[] = {0x48, 0x89, 0x7D, 0xF8};  // MOV [RBP-8], RDI (example)
-    return append_bytes(mc, code, 4);
-}
-
-// Encode ADD RAX, RBX (add RAX and RBX, store result in RAX)
-int encode_add_rax_rbx(MachineCode* mc) {
-    uint8_t code[] = {0x48, 0x01, 0xD8};  // ADD RAX, RBX
-    return append_bytes(mc, code, 3);
-}
-
-// Encode MOV RAX, [memory_location] - load value from memory to RAX
-int encode_mov_rax_from_memory(MachineCode* mc, int offset_from_rbp) {
-    // MOV RAX, [RBP + offset] - load from stack location
-    uint8_t code[] = {0x48, 0x8B, 0x85};  // MOV RAX, [RBP+disp32]
-    uint8_t offset_bytes[4];
-    *(int32_t*)offset_bytes = offset_from_rbp;
-
-    // Append the instruction
-    int result = append_bytes(mc, code, 3);
-    if (result != 0) return result;
-    return append_bytes(mc, offset_bytes, 4);
-}
-
-// Encode MOV [memory_location], RAX - store RAX to memory
-int encode_mov_memory_from_rax(MachineCode* mc, int offset_from_rbp) {
-    // MOV [RBP + offset], RAX - store to stack location
-    uint8_t code[] = {0x48, 0x89, 0x85};  // MOV [RBP+disp32], RAX
-    uint8_t offset_bytes[4];
-    *(int32_t*)offset_bytes = offset_from_rbp;
-
-    int result = append_bytes(mc, code, 3);
-    if (result != 0) return result;
-    return append_bytes(mc, offset_bytes, 4);
-}
-
-// Encode MOV RBX, immediate32 value
-int encode_mov_rbx_imm32(MachineCode* mc, int32_t value) {
-    uint8_t code[7];
-    code[0] = 0x48;  // REX prefix for 64-bit
-    code[1] = 0xC7;  // MOV r32, imm32
-    code[2] = 0xCB;  // ModR/M for RBX
-    // Immediate value in little-endian
-    *(int32_t*)(code + 3) = value;
-    return append_bytes(mc, code, 7);
-}
-
-// Encode SUB RAX, RBX (subtract RBX from RAX, store result in RAX)
-int encode_sub_rax_rbx(MachineCode* mc) {
-    uint8_t code[] = {0x48, 0x29, 0xD8};  // SUB RAX, RBX
-    return append_bytes(mc, code, 3);
-}
-
-// Encode MOV RCX, immediate32 value
-int encode_mov_rcx_imm32(MachineCode* mc, int32_t value) {
-    uint8_t code[10];  // B9 + imm32 (4 bytes) + sign extension to 64-bit
-    code[0] = 0x48;  // REX.W prefix for 64-bit operation
-    code[1] = 0xB9;  // MOV RCX, imm32 (sign-extended to 64-bit)
-    // Immediate value in little-endian
-    *(int32_t*)(code + 2) = value;
-    return append_bytes(mc, code, 6);
-}
-
-// Encode MOV RBX, from memory location
-int encode_mov_rbx_from_memory(MachineCode* mc, int offset_from_rbp) {
-    // MOV RBX, [RBP + offset] - load from stack location
-    uint8_t code[] = {0x48, 0x8B, 0x9D};  // MOV RBX, [RBP+disp32]
-    uint8_t offset_bytes[4];
-    *(int32_t*)offset_bytes = offset_from_rbp;
-
-    int result = append_bytes(mc, code, 3);
-    if (result != 0) return result;
-    return append_bytes(mc, offset_bytes, 4);
-}
-
-// Encode MOV RCX, from memory location
-int encode_mov_rcx_from_memory(MachineCode* mc, int offset_from_rbp) {
-    // MOV RCX, [RBP + offset] - load from stack location
-    uint8_t code[] = {0x48, 0x8B, 0x89};  // MOV RCX, [RBP+disp32]
-    uint8_t offset_bytes[4];
-    *(int32_t*)offset_bytes = offset_from_rbp;
-
-    int result = append_bytes(mc, code, 3);
-    if (result != 0) return result;
-    return append_bytes(mc, offset_bytes, 4);
-}
-
-// Encode MOV RBX, from RAX
-int encode_mov_rbx_from_rax(MachineCode* mc) {
-    uint8_t code[] = {0x48, 0x89, 0xC3};  // MOV RBX, RAX
-    return append_bytes(mc, code, 3);
-}
-
-// Encode MOV RCX, from RAX
-int encode_mov_rcx_from_rax(MachineCode* mc) {
-    uint8_t code[] = {0x48, 0x89, 0xC1};  // MOV RCX, RAX
-    return append_bytes(mc, code, 3);
-}
-
-// Encode MOV RBX, from RCX
-int encode_mov_rbx_from_rcx(MachineCode* mc) {
-    uint8_t code[] = {0x48, 0x89, 0xCB};  // MOV RBX, RCX
-    return append_bytes(mc, code, 3);
-}
-
-// Encode MOV RDI, from RAX
-int encode_mov_rdi_from_rax(MachineCode* mc) {
-    uint8_t code[] = {0x48, 0x89, 0xC7};  // MOV RDI, RAX
-    return append_bytes(mc, code, 3);
-}
-
-
-// Encode MUL RBX (multiply RAX by RBX, result in RAX/RDX)
-int encode_mul_rbx(MachineCode* mc) {
-    uint8_t code[] = {0x48, 0x0F, 0xAF, 0xC3};  // IMUL RAX, RBX
-    return append_bytes(mc, code, 4);
-}
-
-// Encode MOV RSI, immediate32 value
-int encode_mov_rsi_imm32(MachineCode* mc, int32_t value) {
-    uint8_t code[10];  // BE + imm32 (4 bytes) + sign extension to 64-bit
-    code[0] = 0x48;  // REX.W prefix for 64-bit operation
-    code[1] = 0xBE;  // MOV RSI, imm32 (sign-extended to 64-bit)
-    // Immediate value in little-endian
-    *(int32_t*)(code + 2) = value;
-    return append_bytes(mc, code, 6);
-}
-
-// Encode DIV RBX (divide RAX by RBX, result in RAX)
-int encode_div_rbx(MachineCode* mc) {
-    // For division, we need to set up RDX to 0 first
-    uint8_t setup_code[] = {0x48, 0x31, 0xD2};  // XOR RDX, RDX
-    uint8_t div_code[] = {0x48, 0xF7, 0xF3};   // DIV RBX
-    int result = append_bytes(mc, setup_code, 3);
-    if (result != 0) return result;
-    return append_bytes(mc, div_code, 3);
-}
-
-// For function call instructions (simplified) - works with MachineCode*
-int encode_call_printf(MachineCode* mc) {
-    // This is a complex operation that requires relocation
-    // For now we'll create a placeholder CALL instruction
-    // This function is used in contexts where only MachineCode is available
-    uint8_t code[] = {0xE8, 0x00, 0x00, 0x00, 0x00};  // CALL rel32 with 0 offset placeholder
-    return append_bytes(mc, code, 5);
-}
-
-// Encode call to external function with relocation
-int encode_call_external(MachineCode* mc) {
-    // Create a CALL instruction with a relocation entry
-    // The actual address will be resolved via relocation during ELF generation
-    uint8_t code[] = {0xE8, 0xFF, 0xFF, 0xFF, 0xFF};  // CALL rel32 (placeholder for relocation)
-
-    int result = append_bytes(mc, code, 5);
-    if (result != 0) return result;
-
-    // Add a relocation entry for this call - but we need to track which symbol
-    // For now, return success - the relocation will be handled during ELF file creation
-    return 0;
-}
-
-// Encode MOV RAX, from RBX
-int encode_mov_rax_from_rbx(MachineCode* mc) {
-    uint8_t code[] = {0x48, 0x89, 0xD8};  // MOV RAX, RBX
-    return append_bytes(mc, code, 3);
-}
-
-void free_compiler(Compiler* compiler) {
-    if (compiler != NULL) {
-        if (compiler->output_file != NULL) {
-            fclose(compiler->output_file);
-
-            if (compiler->output_mode == OUTPUT_ASM) {
-                // For assembly mode, we need to write everything in the correct order:
-                // 1. Complete data section with all strings
-                // 2. Code section from the buffer
-
-                // Now write the complete file with proper structure
-                FILE* final_file = fopen(compiler->output_filename, "w");
-                if (final_file != NULL) {
-                    // Write the complete header with all collected strings in data section
-                    fprintf(final_file, "; Generated by Viva Colombia compiler\n");
-                    fprintf(final_file, "section .data\n");
-                    fprintf(final_file, "    fmt_print db \"%%s\", 10, 0\n");
-                    fprintf(final_file, "    fmt_print_num db \"%%d\", 10, 0\n");
-                    fprintf(final_file, "    str_simon db \"Simón Bolívar: Libertador de Colombia, Venezuela, Ecuador, Perú y Bolivia\", 10, 0\n");
-                    fprintf(final_file, "    str_francisco db \"Francisco de Paula Santander y Nariño: Héroe de la independencia colombiana\", 10, 0\n");
-                    fprintf(final_file, "    str_maria db \"María Cano: Líder obrera y feminista colombiana\", 10, 0\n");
-                    fprintf(final_file, "    str_jorge db \"Jorge Eliécer Gaitán: Líder político y defensor del pueblo colombiano\", 10, 0\n");
-                    fprintf(final_file, "    str_gabriel db \"Gabriel García Márquez: Nobel de Literatura, autor de Cien Años de Soledad\", 10, 0\n");
-
-                    // Add all collected string literals to the data section
-                    for (int i = 0; i < compiler->string_count; i++) {
-                        fprintf(final_file, "    %s: db \"%s\", 0\n",
-                                compiler->strings[i].label, compiler->strings[i].value);
-                    }
-
-                    fprintf(final_file, "\nsection .text\n");
-                    fprintf(final_file, "    global main\n");
-                    fprintf(final_file, "    extern printf\n\n");
-
-                    // Now write the code section from buffer
-                    fprintf(final_file, "%s", compiler->code_buffer);
-
-                    fclose(final_file);
-                }
-            } else if (compiler->output_mode == OUTPUT_ELF) {
-                // For machine code generation mode, use platform-specific output
-                generate_platform_object_file(compiler);
-            }
-        }
-
-        // Clean up machine code if it exists
-        if (compiler->machine_code) {
-            free_machine_code(compiler->machine_code);
-        }
-
-        // Clean up ELF file structure if it exists
-        if (compiler->elf_file) {
-            free_elf_file(compiler->elf_file);
-        }
-
-        // Clean up platform-specific data if it exists
-        if (compiler->platform_specific_data) {
-            // For now, just free the pointer - in a complete implementation
-            // we would free Mach-O or PE file structures here
-            free(compiler->platform_specific_data);
-        }
-
-        free(compiler);
-    }
-}
-
-// ELF File Management Implementation
-ELFFile* init_elf_file() {
-    ELFFile* elf = malloc(sizeof(ELFFile));
-    if (!elf) return NULL;
-
-    // Initialize ELF header
-    memset(&elf->header, 0, sizeof(Elf64_Ehdr));
-
-    // ELF magic number
-    elf->header.e_ident[0] = 0x7f;
-    elf->header.e_ident[1] = 'E';
-    elf->header.e_ident[2] = 'L';
-    elf->header.e_ident[3] = 'F';
-    elf->header.e_ident[4] = ELFCLASS64;  // 64-bit
-    elf->header.e_ident[5] = ELFDATA2LSB; // Little endian
-    elf->header.e_ident[6] = EV_CURRENT;  // Current version
-    elf->header.e_ident[7] = 0;           // OS/ABI
-    elf->header.e_ident[8] = 0;           // ABI version
-
-    elf->header.e_type = ET_REL;          // Relocatable file
-    elf->header.e_machine = EM_X86_64;    // x86-64
-    elf->header.e_version = EV_CURRENT;
-    elf->header.e_ehsize = sizeof(Elf64_Ehdr);
-    elf->header.e_shentsize = sizeof(Elf64_Shdr);
-    elf->header.e_phentsize = 0;          // No program header for relocatable file
-
-    // Initialize section management
-    elf->sections = malloc(sizeof(ElfSection*) * 16); // Start with 16 sections
-    elf->num_sections = 0;
-    elf->text_section_idx = -1;
-    elf->data_section_idx = -1;
-    elf->symtab_section_idx = -1;
-    elf->strtab_section_idx = -1;
-    elf->shstrtab_section_idx = -1;
-
-    return elf;
-}
-
-void free_elf_file(ELFFile* elf) {
-    if (!elf) return;
-
-    for (int i = 0; i < elf->num_sections; i++) {
-        if (elf->sections[i]) {
-            if (elf->sections[i]->data) {
-                free(elf->sections[i]->data);
-            }
-            if (elf->sections[i]->name) {
-                free(elf->sections[i]->name);
-            }
-            free(elf->sections[i]);
-        }
-    }
-
-    if (elf->sections) {
-        free(elf->sections);
-    }
-    free(elf);
-}
-
-int add_elf_section(ELFFile* elf, const char* name, uint32_t type, uint64_t flags) {
-    if (elf->num_sections >= 16) return -1; // Too many sections
-
-    ElfSection* section = malloc(sizeof(ElfSection));
-    if (!section) return -1;
-
-    section->name = malloc(strlen(name) + 1);
-    if (!section->name) {
-        free(section);
-        return -1;
-    }
-
-    strcpy(section->name, name);
-    section->type = type;
-    section->flags = flags;
-    section->addr = 0;
-    section->offset = 0;
-    section->size = 0;
-    section->link = 0;
-    section->info = 0;
-    section->addralign = 1;
-    section->entsize = 0;
-    section->data = NULL;
-
-    elf->sections[elf->num_sections] = section;
-
-    // Track special sections by name
-    if (strcmp(name, ".text") == 0) {
-        elf->text_section_idx = elf->num_sections;
-    } else if (strcmp(name, ".data") == 0) {
-        elf->data_section_idx = elf->num_sections;
-    } else if (strcmp(name, ".symtab") == 0) {
-        elf->symtab_section_idx = elf->num_sections;
-    } else if (strcmp(name, ".strtab") == 0) {
-        elf->strtab_section_idx = elf->num_sections;
-    } else if (strcmp(name, ".shstrtab") == 0) {
-        elf->shstrtab_section_idx = elf->num_sections;
-    }
-
-    return elf->num_sections++;
-}
-
-// Create a text section with machine code
-void create_text_section(ELFFile* elf, MachineCode* code) {
-    int section_idx = add_elf_section(elf, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
-    if (section_idx < 0) return;
-
-    ElfSection* text_section = elf->sections[section_idx];
-    text_section->size = code->size;
-    text_section->addralign = 16; // Align to 16 bytes for x86-64
-    text_section->entsize = 0; // Not applicable for PROGBITS section
-    text_section->data = malloc(code->size);
-    if (text_section->data) {
-        memcpy(text_section->data, code->code, code->size);
-    }
-}
-
-// Write the complete ELF file with proper structure
-int write_complete_elf_file(ELFFile* elf, const char* filename) {
-    if (!elf || !filename) return -1;
-
-    FILE* file = fopen(filename, "wb");
-    if (!file) return -1;
-
-    // Calculate offsets for sections - section headers come after ELF header and all section data
-    uint64_t sections_start_offset = sizeof(Elf64_Ehdr); // Start after ELF header
-    uint64_t current_offset = sections_start_offset;
-
-    // First pass: set up section offsets
-    for (int i = 0; i < elf->num_sections; i++) {
-        if (elf->sections[i]->size > 0) {
-            // Align section offset
-            if (current_offset % 8 != 0) {
-                current_offset = (current_offset + 7) & ~7;
-            }
-            elf->sections[i]->offset = current_offset;
-            current_offset += elf->sections[i]->size;
-        }
-    }
-
-    // Section header table comes after all section data
-    uint64_t section_header_table_offset = current_offset;
-
-    // Update header fields based on section count
-    elf->header.e_shnum = elf->num_sections + 1; // +1 for null section at index 0
-    elf->header.e_shstrndx = elf->shstrtab_section_idx;
-    elf->header.e_shoff = section_header_table_offset; // Point to section header table
-
-    // Write ELF header
-    fwrite(&elf->header, sizeof(Elf64_Ehdr), 1, file);
-
-    // Write section data
-    for (int i = 0; i < elf->num_sections; i++) {
-        if (elf->sections[i]->data && elf->sections[i]->size > 0) {
-            fseek(file, elf->sections[i]->offset, SEEK_SET);
-            fwrite(elf->sections[i]->data, 1, elf->sections[i]->size, file);
-        }
-    }
-
-    // Write section headers table at the end
-    fseek(file, section_header_table_offset, SEEK_SET);
-
-    // Write null section header (index 0)
-    Elf64_Shdr null_shdr = {0};
-    fwrite(&null_shdr, sizeof(Elf64_Shdr), 1, file);
-
-    // Write actual section headers
-    for (int i = 0; i < elf->num_sections; i++) {
-        Elf64_Shdr shdr = {0};
-        shdr.sh_name = 0; // Will be set in more complete implementation
-        shdr.sh_type = elf->sections[i]->type;
-        shdr.sh_flags = elf->sections[i]->flags;
-        shdr.sh_addr = elf->sections[i]->addr;
-        shdr.sh_offset = elf->sections[i]->offset;
-        shdr.sh_size = elf->sections[i]->size;
-        shdr.sh_link = elf->sections[i]->link;
-        shdr.sh_info = elf->sections[i]->info;
-        shdr.sh_addralign = elf->sections[i]->addralign;
-
-        // Set appropriate entry size for different section types
-        if (elf->sections[i]->type == SHT_SYMTAB) {
-            shdr.sh_entsize = sizeof(Elf64_Sym);  // Size of symbol table entry
-        } else if (elf->sections[i]->type == SHT_RELA) {
-            shdr.sh_entsize = sizeof(uint64_t) * 4; // Size of relocation entry
-        } else if (elf->sections[i]->type == SHT_STRTAB) {
-            shdr.sh_entsize = 1; // Size of string table entry
-        } else {
-            shdr.sh_entsize = elf->sections[i]->entsize;
-        }
-
-        fwrite(&shdr, sizeof(Elf64_Shdr), 1, file);
-    }
-
-    fclose(file);
-    return 0;
-}
-
-// Add a symbol to the symbol table
-int add_symbol_to_table(ELFFile* elf, const char* name, uint64_t value, uint64_t size, uint8_t info, uint16_t shndx) {
-    // Find the symtab and strtab sections
-    if (elf->symtab_section_idx < 0 || elf->strtab_section_idx < 0) {
-        return -1;
-    }
-
-    ElfSection* symtab_section = elf->sections[elf->symtab_section_idx];
-    ElfSection* strtab_section = elf->sections[elf->strtab_section_idx];
-
-    // Expand the string table to hold the new string
-    size_t name_len = strlen(name) + 1; // +1 for null terminator
-    uint8_t* new_strtab_data = realloc(strtab_section->data, strtab_section->size + name_len);
-    if (!new_strtab_data) return -1;
-
-    strtab_section->data = new_strtab_data;
-    // Copy the string to the string table
-    strcpy((char*)strtab_section->data + strtab_section->size, name);
-    strtab_section->size += name_len;
-
-    // Calculate the name's offset in the string table
-    uint32_t name_offset = strtab_section->size - name_len;
-
-    // Expand the symbol table to hold the new symbol
-    size_t sym_size = sizeof(Elf64_Sym);
-    uint8_t* new_symtab_data = realloc(symtab_section->data, symtab_section->size + sym_size);
-    if (!new_symtab_data) return -1;
-
-    symtab_section->data = new_symtab_data;
-
-    // Create the symbol entry
-    Elf64_Sym* sym = (Elf64_Sym*)((char*)symtab_section->data + symtab_section->size);
-    sym->st_name = name_offset;
-    sym->st_info = info;
-    sym->st_other = 0;
-    sym->st_shndx = shndx;
-    sym->st_value = value;
-    sym->st_size = size;
-
-    symtab_section->size += sym_size;
-
-    return 0;
-}
-
-// Create symbol table
-void create_symbol_table(ELFFile* elf) {
-    // Create string table first
-    int strtab_idx = add_elf_section(elf, ".strtab", SHT_STRTAB, 0);
-    if (strtab_idx < 0) return;
-
-    // Create symbol table - link to string table
-    int symtab_idx = add_elf_section(elf, ".symtab", SHT_SYMTAB, 0);
-    if (symtab_idx < 0) return;
-
-    // Update symbol table section to link to string table
-    elf->sections[symtab_idx]->link = strtab_idx + 1;  // +1 because of the null section at index 0
-    elf->sections[symtab_idx]->entsize = sizeof(Elf64_Sym);  // Size of each symbol entry
-
-    // Add section header string table
-    int shstrtab_idx = add_elf_section(elf, ".shstrtab", SHT_STRTAB, 0);
-    if (shstrtab_idx < 0) return;
-
-    // Update the section header string table index
-    elf->header.e_shstrndx = shstrtab_idx;
-
-    // Add NULL symbol (required at index 0 of symbol table)
-    add_symbol_to_table(elf, "", 0, 0, ELF64_ST_INFO(0, 0), 0);
-
-    // Add .text symbol if text section exists
-    if (elf->text_section_idx >= 0) {
-        add_symbol_to_table(elf, ".text", 0, 0,
-                           ELF64_ST_INFO(STB_LOCAL, STT_SECTION),
-                           elf->text_section_idx + 1);  // +1 for null section
-    }
-
-    // Add 'main' symbol (assuming our code implements main function)
-    add_symbol_to_table(elf, "main", 0, 0,
-                       ELF64_ST_INFO(STB_GLOBAL, STT_FUNC),
-                       elf->text_section_idx + 1);  // +1 for null section
-}
-
-// Add a relocation entry
-int add_relocation_entry(MachineCode* mc, uint32_t sym_index, uint32_t type, int64_t addend) {
-    if (!mc) return -1;
-
-    // Check if we need to expand the relocations array
-    if (mc->reloc_count >= mc->reloc_capacity) {
-        mc->reloc_capacity *= 2;
-        Elf64_Rela* new_relocs = realloc(mc->relocations, mc->reloc_capacity * sizeof(Elf64_Rela));
-        if (!new_relocs) return -1;
-        mc->relocations = new_relocs;
-    }
-
-    // Create the relocation entry
-    Elf64_Rela* reloc = &mc->relocations[mc->reloc_count];
-    reloc->r_offset = mc->size;  // The current position in machine code where this relocation applies
-    reloc->r_info = ELF64_R_INFO(sym_index, type);
-    reloc->r_addend = addend;
-
-    mc->reloc_count++;
-    return 0;
-}
-
-// Mach-O object file structures and functions
-typedef struct {
-    mach_header_64 header;
-    load_command* load_commands;
-    int num_commands;
-    // Section data
-    uint8_t* text_section_data;
-    size_t text_section_size;
-    uint8_t* data_section_data;
-    size_t data_section_size;
-} MachOFile;
-
-MachOFile* init_macho_file() {
-    MachOFile* macho = malloc(sizeof(MachOFile));
-    if (!macho) return NULL;
-
-    // Initialize Mach-O header for 64-bit x86-64 object file
-    macho->header.magic = MH_MAGIC_64;
-    macho->header.cputype = CPU_TYPE_X86_64;
-    macho->header.cpusubtype = 3; // CPU_SUBTYPE_X86_64_ALL
-    macho->header.filetype = MH_OBJECT; // Relocatable object file
-    macho->header.ncmds = 0;
-    macho->header.sizeofcmds = 0;
-    macho->header.flags = 0;
-    macho->header.reserved = 0;
-
-    macho->load_commands = malloc(sizeof(load_command) * 10); // Start with 10 commands
-    macho->num_commands = 0;
-
-    macho->text_section_data = NULL;
-    macho->text_section_size = 0;
-    macho->data_section_data = NULL;
-    macho->data_section_size = 0;
-
-    return macho;
-}
-
-void free_macho_file(MachOFile* macho) {
-    if (!macho) return;
-
-    if (macho->load_commands) {
-        free(macho->load_commands);
-    }
-    if (macho->text_section_data) {
-        free(macho->text_section_data);
-    }
-    if (macho->data_section_data) {
-        free(macho->data_section_data);
-    }
-    free(macho);
-}
-
-// Function to write a Mach-O file
-int write_macho_file(MachOFile* macho, const char* filename) {
-    if (!macho || !filename) return -1;
-
-    FILE* file = fopen(filename, "wb");
-    if (!file) return -1;
-
-    // Write the mach header
-    fwrite(&macho->header, sizeof(mach_header_64), 1, file);
-
-    // Write load commands
-    // (In a full implementation, this would write the actual segment and section commands)
-
-    // Write section data
-    if (macho->text_section_data && macho->text_section_size > 0) {
-        fwrite(macho->text_section_data, 1, macho->text_section_size, file);
-    }
-
-    fclose(file);
-    return 0;
-}
-
-// PE/COFF object file structures and functions
-typedef struct {
-    uint32_t signature;  // IMAGE_NT_SIGNATURE
-    IMAGE_FILE_HEADER file_header;
-    IMAGE_SECTION_HEADER* section_headers;
-    int num_sections;
-    // Section data
-    uint8_t* text_section_data;
-    size_t text_section_size;
-    uint8_t* data_section_data;
-    size_t data_section_size;
-} PEFile;
-
-PEFile* init_pe_file() {
-    PEFile* pe = malloc(sizeof(PEFile));
-    if (!pe) return NULL;
-
-    pe->signature = IMAGE_NT_SIGNATURE;
-
-    // Initialize file header for 64-bit object file
-    pe->file_header.Machine = 0x8664; // IMAGE_FILE_MACHINE_AMD64
-    pe->file_header.NumberOfSections = 0;
-    pe->file_header.TimeDateStamp = 0;
-    pe->file_header.PointerToSymbolTable = 0;
-    pe->file_header.NumberOfSymbols = 0;
-    pe->file_header.SizeOfOptionalHeader = 0;
-    pe->file_header.Characteristics = 0x0200; // IMAGE_FILE_DLL
-
-    pe->section_headers = malloc(sizeof(IMAGE_SECTION_HEADER) * 10); // Start with 10 sections
-    pe->num_sections = 0;
-
-    pe->text_section_data = NULL;
-    pe->text_section_size = 0;
-    pe->data_section_data = NULL;
-    pe->data_section_size = 0;
-
-    return pe;
-}
-
-void free_pe_file(PEFile* pe) {
-    if (!pe) return;
-
-    if (pe->section_headers) {
-        free(pe->section_headers);
-    }
-    if (pe->text_section_data) {
-        free(pe->text_section_data);
-    }
-    if (pe->data_section_data) {
-        free(pe->data_section_data);
-    }
-    free(pe);
-}
-
-// Function to write a PE file
-int write_pe_file(PEFile* pe, const char* filename) {
-    if (!pe || !filename) return -1;
-
-    FILE* file = fopen(filename, "wb");
-    if (!file) return -1;
-
-    // Write NT signature
-    fwrite(&pe->signature, sizeof(uint32_t), 1, file);
-
-    // Write file header
-    fwrite(&pe->file_header, sizeof(IMAGE_FILE_HEADER), 1, file);
-
-    // Write section headers
-    // (In a full implementation, this would write actual section headers)
-
-    // Write section data
-    if (pe->text_section_data && pe->text_section_size > 0) {
-        fwrite(pe->text_section_data, 1, pe->text_section_size, file);
-    }
-
-    fclose(file);
-    return 0;
-}
-
-// Function to create platform-specific object file
-int generate_platform_object_file(Compiler* compiler) {
-    if (!compiler) return -1;
-
-    switch (compiler->platform_target) {
-        case PLATFORM_LINUX:
-            generate_elf_file(compiler);
-            break;
-        case PLATFORM_MACOS:
-            {
-                // Create Mach-O file
-                MachOFile* macho = init_macho_file();
-                if (macho && compiler->machine_code) {
-                    macho->text_section_data = malloc(compiler->machine_code->size);
-                    if (macho->text_section_data) {
-                        memcpy(macho->text_section_data, compiler->machine_code->code, compiler->machine_code->size);
-                        macho->text_section_size = compiler->machine_code->size;
-                        write_macho_file(macho, compiler->output_filename);
-                    }
-                }
-                if (macho) free_macho_file(macho);
-            }
-            break;
-        case PLATFORM_WINDOWS:
-            {
-                // Create PE file
-                PEFile* pe = init_pe_file();
-                if (pe && compiler->machine_code) {
-                    pe->text_section_data = malloc(compiler->machine_code->size);
-                    if (pe->text_section_data) {
-                        memcpy(pe->text_section_data, compiler->machine_code->code, compiler->machine_code->size);
-                        pe->text_section_size = compiler->machine_code->size;
-                        write_pe_file(pe, compiler->output_filename);
-                    }
-                }
-                if (pe) free_pe_file(pe);
-            }
-            break;
-        default:
-            generate_elf_file(compiler);  // Fallback to ELF
-            break;
-    }
-
     return 0;
 }

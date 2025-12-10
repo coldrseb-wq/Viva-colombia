@@ -121,10 +121,42 @@ ASTNode* parse_primary(TokenStream* tokens, int* pos) {
                 }
             }
             if (*pos < tokens->count) (*pos)++; // skip final RPAREN
+
+            // Check and consume semicolon if present after function call
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                (*pos)++; // skip semicolon
+            }
         } else {
             node = init_ast_node(IDENTIFIER_NODE);
             node->value = strdup(current_token->value);
             (*pos)++;
+
+            // Check for array access: identifier[expression]
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACKET) {
+                // Transform from IDENTIFIER_NODE to ARRAY_ACCESS_NODE
+                char* array_name = strdup(node->value);
+                free_ast_node(node); // Free the temporary identifier node
+                node = init_ast_node(ARRAY_ACCESS_NODE);
+                node->value = array_name;
+
+                (*pos)++; // skip '['
+
+                // Parse the index expression
+                node->left = parse_expression(tokens, pos);
+
+                // Expect closing ']'
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACKET) {
+                    (*pos)++; // skip ']'
+                } else {
+                    // Error: expected closing bracket
+                    fprintf(stderr, "Error: Expected ']' at line %d\n", current_token->line);
+                }
+            }
+
+            // Check and consume semicolon if present after identifier/array access (in case of variable usage without assignment)
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                (*pos)++; // skip semicolon
+            }
         }
     }
     else if (current_token->type == LPAREN) {
@@ -183,6 +215,11 @@ ASTNode* parse_expression_helper(TokenStream* tokens, int* pos, Precedence prece
     while (*pos < tokens->count) {
         Token* current_token = tokens->tokens[*pos];
         Precedence current_prec = get_precedence(current_token->type);
+
+        // If this is not an operator (PREC_NONE), stop expression parsing
+        if (current_prec == PREC_NONE) {
+            break;
+        }
 
         if (current_prec < precedence) {
             break;
@@ -253,6 +290,11 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                 }
                 node->value = var_name;  // variable name
                 node->left = value_expr; // value to assign
+
+                // Check and consume semicolon if present
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                    (*pos)++; // skip semicolon
+                }
             } else {
                 // Handle case where there's no assignment (just declaration)
                 if (current_token->type == DECRETO) {
@@ -262,6 +304,11 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                 }
                 node->value = var_name;
                 free(var_name);
+
+                // Check and consume semicolon if present
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                    (*pos)++; // skip semicolon
+                }
             }
         }
     } else if (current_token->type == SI) {
@@ -289,6 +336,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
 
                     // Parse statements in the block until closing brace
                     while (*pos < tokens->count && tokens->tokens[*pos]->type != RBRACE) {
+                        int original_pos = *pos;  // Track original position
                         ASTNode* stmt = parse_statement(tokens, pos);
                         if (stmt != NULL) {
                             if (then_body == NULL) {
@@ -298,6 +346,10 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                                 current_stmt->right = stmt;
                                 current_stmt = stmt;
                             }
+                        } else if (*pos == original_pos) {
+                            // If no statement was parsed and position didn't advance,
+                            // we need to skip the current token to avoid infinite loop
+                            (*pos)++;
                         }
                     }
 
@@ -306,10 +358,62 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                         (*pos)++; // skip '}'
                     }
 
+                    // Check and consume semicolon if present after the if block
+                    if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                        (*pos)++; // skip semicolon
+                    }
+
                     // Create if node
                     node = init_ast_node(IF_SPANISH_NODE);
                     node->left = condition;   // condition
                     node->right = then_body;  // then block body
+
+                    // Check for 'sino' (else) clause after the if block
+                    if (*pos < tokens->count && tokens->tokens[*pos]->type == SINO) {
+                        (*pos)++; // skip 'sino'
+
+                        // Expect opening brace for the else block
+                        if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACE) {
+                            (*pos)++; // skip '{'
+
+                            // Parse the else block body
+                            ASTNode* else_body = NULL;
+                            ASTNode* current_stmt = NULL;
+
+                            // Parse statements in the else block until closing brace
+                            while (*pos < tokens->count && tokens->tokens[*pos]->type != RBRACE) {
+                                int original_pos = *pos;  // Track original position
+                                ASTNode* stmt = parse_statement(tokens, pos);
+                                if (stmt != NULL) {
+                                    if (else_body == NULL) {
+                                        else_body = stmt;
+                                        current_stmt = stmt;
+                                    } else {
+                                        current_stmt->right = stmt;
+                                        current_stmt = stmt;
+                                    }
+                                } else if (*pos == original_pos) {
+                                    // If no statement was parsed and position didn't advance,
+                                    // we need to skip the current token to avoid infinite loop
+                                    (*pos)++;
+                                }
+                            }
+
+                            // Skip closing brace
+                            if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACE) {
+                                (*pos)++; // skip '}'
+                            }
+
+                            // For if-else, we need a way to store both then and else blocks
+                            // We'll create a special structure where:
+                            // node->right (already set to then_body) gets replaced with a new node
+                            // This new node has left=then_body, right=else_body
+                            ASTNode* then_else_node = init_ast_node(IF_SPANISH_NODE); // Reusing type for internal structure
+                            then_else_node->left = then_body;  // then block
+                            then_else_node->right = else_body;  // else block
+                            node->right = then_else_node;      // Update the original node
+                        }
+                    }
                 } else {
                     // Create if node with just condition if no block found
                     node = init_ast_node(IF_SPANISH_NODE);
@@ -343,6 +447,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
 
                     // Parse statements in the block until closing brace
                     while (*pos < tokens->count && tokens->tokens[*pos]->type != RBRACE) {
+                        int original_pos = *pos;  // Track original position
                         ASTNode* stmt = parse_statement(tokens, pos);
                         if (stmt != NULL) {
                             if (loop_body == NULL) {
@@ -352,12 +457,21 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                                 current_stmt->right = stmt;
                                 current_stmt = stmt;
                             }
+                        } else if (*pos == original_pos) {
+                            // If no statement was parsed and position didn't advance,
+                            // we need to skip the current token to avoid infinite loop
+                            (*pos)++;
                         }
                     }
 
                     // Skip closing brace
                     if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACE) {
                         (*pos)++; // skip '}'
+                    }
+
+                    // Check and consume semicolon if present after the while block
+                    if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                        (*pos)++; // skip semicolon
                     }
 
                     // Create while node
@@ -372,6 +486,98 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                 }
             }
         }
+    } else if (current_token->type == PARA) {
+        // Handle "para" (for) loops: para (init; condition; increment) { body }
+        // For now, we'll support a simplified version: para identifier = start, end { body }
+        (*pos)++; // skip 'para'
+
+        // Expect opening parenthesis
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
+            (*pos)++; // skip '('
+
+            // Parse the for loop components: init, condition, increment
+            // Simple form: for var = start to end
+            ASTNode* init_expr = NULL;
+            ASTNode* condition_expr = NULL;
+            ASTNode* increment_expr = NULL;
+
+            // For now, parse a simplified form like: para i = 0; i < 10; i = i + 1)
+            // Parse initialization expression
+            init_expr = parse_expression(tokens, pos);
+
+            // Expect semicolon
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                (*pos)++; // skip ';'
+            }
+
+            // Parse condition expression
+            condition_expr = parse_expression(tokens, pos);
+
+            // Expect semicolon
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                (*pos)++; // skip ';'
+            }
+
+            // Parse increment expression
+            increment_expr = parse_expression(tokens, pos);
+
+            // Expect closing parenthesis
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                (*pos)++; // skip ')'
+
+                // Expect opening brace for the block
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACE) {
+                    (*pos)++; // skip '{'
+
+                    // Parse the loop body
+                    ASTNode* loop_body = NULL;
+                    ASTNode* current_stmt = NULL;
+
+                    // Parse statements in the block until closing brace
+                    while (*pos < tokens->count && tokens->tokens[*pos]->type != RBRACE) {
+                        int original_pos = *pos;  // Track original position
+                        ASTNode* stmt = parse_statement(tokens, pos);
+                        if (stmt != NULL) {
+                            if (loop_body == NULL) {
+                                loop_body = stmt;
+                                current_stmt = stmt;
+                            } else {
+                                current_stmt->right = stmt;
+                                current_stmt = stmt;
+                            }
+                        } else if (*pos == original_pos) {
+                            // If no statement was parsed and position didn't advance,
+                            // we need to skip the current token to avoid infinite loop
+                            (*pos)++;
+                        }
+                    }
+
+                    // Skip closing brace
+                    if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACE) {
+                        (*pos)++; // skip '}'
+                    }
+
+                    // Create a special structure for the for loop:
+                    // node->left = init_condition_increment (linked list of 3 expressions)
+                    // node->right = loop_body
+                    ASTNode* for_node = init_ast_node(FOR_SPANISH_NODE);
+
+                    // Create a chain of the three expressions: init -> condition -> increment
+                    ASTNode* init_chain = init_expr;
+                    if (init_expr) {
+                        init_expr->right = condition_expr;
+                        if (condition_expr) {
+                            condition_expr->right = increment_expr;
+                        }
+                    }
+
+                    for_node->left = init_chain;  // init; condition; increment
+                    for_node->right = loop_body;  // loop body
+
+                    return for_node;
+                }
+            }
+        }
     } else if (current_token->type == FN || current_token->type == CANCION) {
         // Handle function declarations: fn name(params) { body } or cancion name(params) { body }
         int is_spanish = (current_token->type == CANCION);
@@ -382,74 +588,156 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
             char* func_name = strdup(tokens->tokens[*pos]->value);
             (*pos)++; // skip function name
 
+            // Create function node early to store parameters
+            ASTNode* func_node = init_ast_node(is_spanish ? FN_DECL_SPANISH_NODE : FN_DECL_NODE);
+            func_node->value = func_name;  // function name
+
             // Expect opening parenthesis for parameters
             if (*pos < tokens->count && tokens->tokens[*pos]->type == LPAREN) {
                 (*pos)++; // skip '('
 
-                // For now, we'll parse the parameter list but ignore it
-                // In a full implementation we'd build the parameter list
+                // Parse the parameter list - for now, just track them as identifiers
+                // We'll create a linked list of parameter names in the right->left (parameters in the left of the right node)
                 int paren_count = 1;
-                while (*pos < tokens->count && paren_count > 0) {
-                    if (tokens->tokens[*pos]->type == LPAREN) {
-                        paren_count++;
-                    } else if (tokens->tokens[*pos]->type == RPAREN) {
-                        paren_count--;
-                    }
-                    if (paren_count > 0) {
-                        (*pos)++;
-                    }
-                }
-                if (*pos < tokens->count) (*pos)++; // skip final RPAREN
+                ASTNode* param_list = NULL;
+                ASTNode* current_param = NULL;
 
-                // Expect opening brace for function body
-                if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACE) {
-                    (*pos)++; // skip '{'
+                // Check if there are actually parameters (not just empty parentheses)
+                if (*pos < tokens->count && tokens->tokens[*pos]->type != RPAREN) {
+                    while (*pos < tokens->count && paren_count > 0) {
+                        if (tokens->tokens[*pos]->type == IDENTIFIER) {
+                            // Found a parameter identifier
+                            ASTNode* param_node = init_ast_node(IDENTIFIER_NODE);
+                            param_node->value = strdup(tokens->tokens[*pos]->value);
 
-                    // Parse the function body
-                    ASTNode* func_body = NULL;
-                    ASTNode* current_stmt = NULL;
-
-                    // Parse statements in the function body until closing brace
-                    while (*pos < tokens->count && tokens->tokens[*pos]->type != RBRACE) {
-                        ASTNode* stmt = parse_statement(tokens, pos);
-                        if (stmt != NULL) {
-                            if (func_body == NULL) {
-                                func_body = stmt;
-                                current_stmt = stmt;
+                            if (param_list == NULL) {
+                                param_list = param_node;
+                                current_param = param_node;
                             } else {
-                                current_stmt->right = stmt;
-                                current_stmt = stmt;
+                                current_param->right = param_node;  // Link parameters together
+                                current_param = param_node;
                             }
+
+                            (*pos)++;
+                        } else if (tokens->tokens[*pos]->type == COMMA) {
+                            // Skip comma between parameters
+                            (*pos)++;
+                        } else if (tokens->tokens[*pos]->type == LPAREN) {
+                            paren_count++;
+                            (*pos)++;
+                        } else if (tokens->tokens[*pos]->type == RPAREN) {
+                            paren_count--;
+                            if (paren_count > 0) {
+                                (*pos)++;
+                            }
+                        } else {
+                            // Unexpected token, just advance to avoid infinite loop
+                            (*pos)++;
                         }
                     }
-
-                    // Skip closing brace
-                    if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACE) {
-                        (*pos)++; // skip '}'
-                    }
-
-                    // Create function declaration node
-                    ASTNode* func_node = init_ast_node(is_spanish ? FN_DECL_SPANISH_NODE : FN_DECL_NODE);
-                    func_node->value = func_name;  // function name
-                    func_node->right = func_body;  // function body
-
-                    return func_node;
-                } else {
-                    free(func_name);
-                    return NULL;
                 }
+
+                // If we're still at RPAREN, advance
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
+                    (*pos)++; // skip final RPAREN
+                }
+
+                // Store the parameter list in the function node as the left child of the right node
+                // This allows us to have: func_node->left = parameters, func_node->right = body
+                // Actually, let's store parameters in func_node->left to keep it clean
+                func_node->left = param_list; // Store function parameters
+            }
+
+            // Expect opening brace for function body
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACE) {
+                (*pos)++; // skip '{'
+
+                // Parse the function body
+                ASTNode* func_body = NULL;
+                ASTNode* current_stmt = NULL;
+
+                // Parse statements in the function body until closing brace
+                while (*pos < tokens->count && tokens->tokens[*pos]->type != RBRACE) {
+                    ASTNode* stmt = parse_statement(tokens, pos);
+                    if (stmt != NULL) {
+                        if (func_body == NULL) {
+                            func_body = stmt;
+                            current_stmt = stmt;
+                        } else {
+                            current_stmt->right = stmt;
+                            current_stmt = stmt;
+                        }
+                    }
+                }
+
+                // Skip closing brace
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACE) {
+                    (*pos)++; // skip '}'
+                }
+
+                // Store the function body in func_node->right
+                func_node->right = func_body;  // function body
+
+                return func_node;
             } else {
-                free(func_name);
-                return NULL;
+                // No body, still return the function node with parameters
+                func_node->right = NULL;  // no body
+                return func_node;
             }
         } else {
             return NULL;
         }
+    } else if (current_token->type == ROMPER) {
+        // Handle "romper" (break) statements: romper;
+        (*pos)++; // skip 'romper'
+
+        // Create break node (no expression needed)
+        node = init_ast_node(BREAK_NODE);
+        // No left child for break statement
+
+        // Check and consume semicolon if present
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+            (*pos)++; // skip semicolon
+        }
+        return node;
+    } else if (current_token->type == CONTINUAR) {
+        // Handle "continuar" (continue) statements: continuar;
+        (*pos)++; // skip 'continuar'
+
+        // Create continue node (no expression needed)
+        node = init_ast_node(CONTINUE_NODE);
+        // No left child for continue statement
+
+        // Check and consume semicolon if present
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+            (*pos)++; // skip semicolon
+        }
+        return node;
     } else if (current_token->type == SEMICOLON) {
         // Skip semicolon tokens - they are statement terminators
         (*pos)++;
         // Return NULL to indicate this is just a semicolon, not a statement
         return NULL;
+    } else if (current_token->type == RETORNO) {
+        // Handle "retorno" (return) statements: retorno expression;
+        (*pos)++; // skip 'retorno'
+
+        // Parse the return expression (if there is one)
+        ASTNode* return_expr = NULL;
+        if (*pos < tokens->count && tokens->tokens[*pos]->type != SEMICOLON &&
+            tokens->tokens[*pos]->type != RBRACE) {
+            return_expr = parse_expression(tokens, pos);
+        }
+
+        // Create return node
+        node = init_ast_node(RETURN_NODE);
+        node->left = return_expr; // return value expression (or NULL if no value)
+
+        // Check and consume semicolon if present
+        if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+            (*pos)++; // skip semicolon
+        }
+        return node;
     } else if (current_token->type == IDENTIFIER) {
         // Handle assignment statements: identifier = expression;
         int next_pos = *pos + 1;
@@ -462,6 +750,11 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
             node = init_ast_node(ASSIGN_NODE);
             node->value = var_name;
             node->left = value_expr; // value to assign
+
+            // Check and consume semicolon if present
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                (*pos)++; // skip semicolon
+            }
             return node;
         } else {
             // If it's just an identifier without assignment, continue to expression parsing
@@ -481,6 +774,7 @@ ASTNode* parse_program(TokenStream* tokens) {
     
     int pos = 0;
     while (pos < tokens->count) {
+        int original_pos = pos;  // Track original position
         ASTNode* stmt = parse_statement(tokens, &pos);
         if (stmt != NULL) {
             if (root->left == NULL) {
@@ -491,6 +785,10 @@ ASTNode* parse_program(TokenStream* tokens) {
                 current->right = stmt;
                 current = stmt;
             }
+        } else if (pos == original_pos) {
+            // If no statement was parsed and position didn't advance,
+            // we need to skip the current token to avoid infinite loop
+            pos++;
         }
     }
 
