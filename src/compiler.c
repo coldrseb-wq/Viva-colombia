@@ -663,11 +663,32 @@ static void compile_for(Compiler* c, ASTNode* n) {
 
     if (c->mode == OUT_C) {
         indent(c); emit(c, "for (");
-        if (n->left) compile_expr(c, n->left);
+        if (n->left) {
+            if (n->left->type == VAR_DECL_NODE || n->left->type == VAR_DECL_SPANISH_NODE) {
+                // Variable declaration in for loop init: int i = value
+                emit(c, "int %s = ", n->left->value);
+                if (n->left->left) compile_expr(c, n->left->left);
+                else emit(c, "0");
+            } else if (n->left->type == ASSIGN_NODE) {
+                // Assignment in for loop init: i = value
+                emit(c, "%s = ", n->left->value ? n->left->value : "");
+                if (n->left->right) compile_expr(c, n->left->right);
+            } else {
+                compile_expr(c, n->left);
+            }
+        }
         emit(c, "; ");
         if (n->extra && n->extra->left) compile_expr(c, n->extra->left);
         emit(c, "; ");
-        if (n->extra && n->extra->right) compile_expr(c, n->extra->right);
+        if (n->extra && n->extra->right) {
+            if (n->extra->right->type == ASSIGN_NODE) {
+                // Assignment in for loop increment: i = i + 1
+                emit(c, "%s = ", n->extra->right->value ? n->extra->right->value : "");
+                if (n->extra->right->right) compile_expr(c, n->extra->right->right);
+            } else {
+                compile_expr(c, n->extra->right);
+            }
+        }
         emit(c, ") {\n");
         c->indent++;
         compile_node(c, n->body);

@@ -1,0 +1,23 @@
+// Test for loops
+
+println("=== For Loop Test ===");
+
+// Test basic for loop (para)
+decreto sum = 0;
+para (decreto i = 1; i <= 5; i = i + 1) {
+    sum = sum + i;
+}
+println("Sum 1-5 with for:");
+println(sum);
+
+// Test nested for loops
+decreto total = 0;
+para (decreto i = 1; i <= 3; i = i + 1) {
+    para (decreto j = 1; j <= 2; j = j + 1) {
+        total = total + 1;
+    }
+}
+println("Nested loops (3x2):");
+println(total);
+
+println("=== Test Complete ===");

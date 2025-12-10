@@ -95,6 +95,7 @@ TokenStream* tokenize(const char* source) {
             else if (strcmp(buffer, "if") == 0 || strcmp(buffer, "si") == 0) type = SI;
             else if (strcmp(buffer, "else") == 0 || strcmp(buffer, "sino") == 0) type = SINO;
             else if (strcmp(buffer, "while") == 0 || strcmp(buffer, "mientras") == 0) type = MIENTRAS;
+            else if (strcmp(buffer, "for") == 0 || strcmp(buffer, "para") == 0) type = PARA;
             else if (strcmp(buffer, "not") == 0 || strcmp(buffer, "no") == 0) type = NO; // Spanish "not"
             else if (strcmp(buffer, "return") == 0 || strcmp(buffer, "retorno") == 0) type = RETORNO;
 

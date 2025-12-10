@@ -521,9 +521,41 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
             ASTNode* condition_expr = NULL;
             ASTNode* increment_expr = NULL;
 
-            // For now, parse a simplified form like: para i = 0; i < 10; i = i + 1)
-            // Parse initialization expression
-            init_expr = parse_expression(tokens, pos);
+            // For now, parse a simplified form like: para (decreto i = 0; i < 10; i = i + 1)
+            // Parse initialization - could be a variable declaration or assignment
+            if (*pos < tokens->count &&
+                (tokens->tokens[*pos]->type == DECRETO || tokens->tokens[*pos]->type == LET)) {
+                // Variable declaration: decreto i = 0
+                (*pos)++; // skip 'decreto'
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == IDENTIFIER) {
+                    char* var_name = strdup(tokens->tokens[*pos]->value);
+                    (*pos)++; // skip variable name
+
+                    if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+                        (*pos)++; // skip '='
+                        ASTNode* value_expr = parse_expression(tokens, pos);
+
+                        init_expr = init_ast_node(VAR_DECL_SPANISH_NODE);
+                        init_expr->value = var_name;
+                        init_expr->left = value_expr;
+                    } else {
+                        free(var_name);
+                    }
+                }
+            } else {
+                // Regular expression/assignment: i = 1
+                ASTNode* left_expr = parse_expression(tokens, pos);
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+                    (*pos)++; // skip '='
+                    ASTNode* right_expr = parse_expression(tokens, pos);
+                    init_expr = init_ast_node(ASSIGN_NODE);
+                    init_expr->value = left_expr->value ? strdup(left_expr->value) : NULL;
+                    init_expr->left = left_expr;
+                    init_expr->right = right_expr;
+                } else {
+                    init_expr = left_expr;
+                }
+            }
 
             // Expect semicolon
             if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
@@ -538,8 +570,18 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                 (*pos)++; // skip ';'
             }
 
-            // Parse increment expression
-            increment_expr = parse_expression(tokens, pos);
+            // Parse increment expression - may be an assignment like i = i + 1
+            ASTNode* inc_left = parse_expression(tokens, pos);
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+                (*pos)++; // skip '='
+                ASTNode* inc_right = parse_expression(tokens, pos);
+                increment_expr = init_ast_node(ASSIGN_NODE);
+                increment_expr->value = inc_left->value ? strdup(inc_left->value) : NULL;
+                increment_expr->left = inc_left;
+                increment_expr->right = inc_right;
+            } else {
+                increment_expr = inc_left;
+            }
 
             // Expect closing parenthesis
             if (*pos < tokens->count && tokens->tokens[*pos]->type == RPAREN) {
@@ -577,22 +619,21 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                         (*pos)++; // skip '}'
                     }
 
-                    // Create a special structure for the for loop:
-                    // node->left = init_condition_increment (linked list of 3 expressions)
-                    // node->right = loop_body
+                    // Create for loop node structure matching compiler expectations:
+                    // n->left = init expression
+                    // n->extra->left = condition expression
+                    // n->extra->right = increment expression
+                    // n->body = loop body
                     ASTNode* for_node = init_ast_node(FOR_SPANISH_NODE);
+                    for_node->left = init_expr;
+                    for_node->body = loop_body;
 
-                    // Create a chain of the three expressions: init -> condition -> increment
-                    ASTNode* init_chain = init_expr;
-                    if (init_expr) {
-                        init_expr->right = condition_expr;
-                        if (condition_expr) {
-                            condition_expr->right = increment_expr;
-                        }
+                    // Store condition and increment in extra node
+                    if (condition_expr || increment_expr) {
+                        for_node->extra = init_ast_node(CONDITION_NODE);
+                        for_node->extra->left = condition_expr;
+                        for_node->extra->right = increment_expr;
                     }
-
-                    for_node->left = init_chain;  // init; condition; increment
-                    for_node->right = loop_body;  // loop body
 
                     return for_node;
                 }
