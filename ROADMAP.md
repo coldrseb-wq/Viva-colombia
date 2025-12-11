@@ -1,7 +1,25 @@
 # Viva Colombia Compiler - Development Roadmap
 
+## Language Vision
+Viva is designed to be:
+- **As strict as Rust** - Strong type safety and compile-time guarantees
+- **Safer than Rust** - Memory safety with additional runtime protections
+- **General purpose** - Able to build any product (systems, applications, games, web)
+- **Faster performance** - Direct machine code with aggressive optimizations
+- **Readable like Go** - Clean, simple Spanish-based syntax that's easy to understand
+
 ## Project Overview
-Viva Colombia is a Spanish-based programming language focused on Colombian culture and heroes, transitioning from C-code generation to direct machine code generation. The ultimate goal is to achieve bootstrapping - creating a Viva compiler written entirely in Viva that generates direct machine code for Windows, macOS, and Linux.
+Viva Colombia is a Spanish-based programming language focused on Colombian culture and heroes, transitioning from C-code generation to direct machine code generation. The ultimate goal is to achieve bootstrapping - creating a Viva compiler written entirely in Viva that generates direct machine code for Windows, macOS, Linux, and FreeBSD.
+
+## Target Platforms
+| Platform | Format | Status |
+|----------|--------|--------|
+| Linux | ELF | ✅ Complete |
+| macOS | Mach-O | ✅ Complete |
+| Windows | PE/COFF | ✅ Complete |
+| FreeBSD | ELF | 🔜 Planned |
+
+FreeBSD uses ELF format like Linux but with different syscall numbers (read=3, write=4, exit=1).
 
 ## Phase 1: Foundation & C-Code Generation (COMPLETED)
 ### Objectives:
@@ -100,6 +118,7 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Assignment operation fixes for all output modes
 
 ### Current Tasks:
+- [ ] FreeBSD platform support (ELF with FreeBSD syscalls)
 - [ ] Advanced machine code optimization passes
 - [ ] Memory management in machine code
 - [ ] Function definition support in machine code
@@ -142,8 +161,54 @@ The progression toward a fully bootstrapped Viva compiler:
 2. **Future Phase**: Use this machine code generating compiler to create a Viva compiler written in Viva itself
 3. **Final Goal**: Viva compiler (written in Viva) that generates direct machine code - achieving true bootstrapping
 
+## Self-Hosting Status (IN PROGRESS)
+
+### Current Architecture
+```
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│   C Compiler        │────▶│   Bootstrap v1      │────▶│   Bootstrap v2      │
+│   (src/*.c)         │     │   (viva_bootstrap)  │     │   (self-hosted)     │
+│   Written in C      │     │   Compiled by C     │     │   Compiled by v1    │
+└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
+```
+
+### What We're Trying to Achieve
+- **Goal**: Make the bootstrap compiler (`bootstrap/viva_bootstrap.viva`) compile itself
+- **Success Criteria**: bootstrap_v2 should be byte-identical (or functionally equivalent) to bootstrap_v1
+- **Why It Matters**: Self-hosting proves the language is complete enough to write real software
+
+### Completed Self-Hosting Fixes
+- ✅ Increased string literal buffers (8KB → 32KB, 64 → 256 entries)
+- ✅ Removed recursive `siguiente_token()` calls that caused stack overflow
+- ✅ Added bounds checking in `leer_cadena()` for string safety
+- ✅ Fixed entry stub generation (moved to end when `main_addr` is known)
+- ✅ Added `find_src_len()` for proper source length detection
+- ✅ Increased code/data buffer sizes (131KB code, 16KB data)
+- ✅ Two-pass compilation for forward references
+- ✅ Element size tracking for arrays
+
+### Current Problems
+1. **Empty code section in bootstrap_v2**: When bootstrap_v1 compiles the bootstrap source, the resulting binary has:
+   - Correct ELF headers
+   - String literals in data section (working)
+   - Empty code section (`code_pos` appears to be 0)
+
+2. **Suspected issue area**: Something between line 77-98 of the bootstrap source causes code generation to stop. This area contains the `leer_identificador` and `leer_numero` functions.
+
+3. **Debugging complexity**: The bootstrap compiler doesn't have debug output, making it hard to trace where code generation fails.
+
+### Next Steps for Self-Hosting
+1. [ ] Add diagnostic output to bootstrap compiler
+2. [ ] Trace code_pos value through compilation
+3. [ ] Identify specific construct causing code generation to fail
+4. [ ] Fix the code generation issue
+5. [ ] Verify bootstrap_v2 produces working executables
+6. [ ] Compare bootstrap_v1 and bootstrap_v2 output
+
 ## Next Critical Steps
-1. Complete advanced machine code optimization passes
-2. Enhance PE/COFF format with full COFF section structure
-3. Develop comprehensive runtime system with memory management
-4. Add complete expression evaluation and control flow in machine code
+1. **Fix self-hosting** - Resolve the empty code section in bootstrap_v2
+2. **Add FreeBSD support** - ELF with FreeBSD syscall numbers
+3. Complete advanced machine code optimization passes
+4. Enhance PE/COFF format with full COFF section structure
+5. Develop comprehensive runtime system with memory management
+6. Add complete expression evaluation and control flow in machine code
