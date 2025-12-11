@@ -1334,46 +1334,58 @@ cancion compile_primary() {
 // Compile term: primary ((* | /) primary)*
 cancion compile_term() {
     compile_primary();
-    mientras (tok_type == 13) {
-        // * multiply
-        emit_push();
-        siguiente_token();
-        compile_primary();
-        emit_mov_rcx();
-        emit_pop();
-        emit_mul();
-    }
-    mientras (tok_type == 14) {
-        // / divide
-        emit_push();
-        siguiente_token();
-        compile_primary();
-        emit_mov_rcx();
-        emit_pop();
-        emit_div();
+    decreto done: entero = 0;
+    mientras (done == 0) {
+        si (tok_type == 13) {
+            // * multiply
+            emit_push();
+            siguiente_token();
+            compile_primary();
+            emit_mov_rcx();
+            emit_pop();
+            emit_mul();
+        } sino {
+            si (tok_type == 14) {
+                // / divide
+                emit_push();
+                siguiente_token();
+                compile_primary();
+                emit_mov_rcx();
+                emit_pop();
+                emit_div();
+            } sino {
+                done = 1;
+            }
+        }
     }
 }
 
 // Compile additive: term ((+ | -) term)*
 cancion compile_additive() {
     compile_term();
-    mientras (tok_type == 11) {
-        // + add
-        emit_push();
-        siguiente_token();
-        compile_term();
-        emit_mov_rcx();
-        emit_pop();
-        emit_add();
-    }
-    mientras (tok_type == 12) {
-        // - subtract
-        emit_push();
-        siguiente_token();
-        compile_term();
-        emit_mov_rcx();
-        emit_pop();
-        emit_sub();
+    decreto done: entero = 0;
+    mientras (done == 0) {
+        si (tok_type == 11) {
+            // + add
+            emit_push();
+            siguiente_token();
+            compile_term();
+            emit_mov_rcx();
+            emit_pop();
+            emit_add();
+        } sino {
+            si (tok_type == 12) {
+                // - subtract
+                emit_push();
+                siguiente_token();
+                compile_term();
+                emit_mov_rcx();
+                emit_pop();
+                emit_sub();
+            } sino {
+                done = 1;
+            }
+        }
     }
 }
 
