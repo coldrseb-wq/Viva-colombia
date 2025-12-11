@@ -76,6 +76,7 @@ typedef struct {
 // Forward declarations
 static void compile_node(Compiler* c, ASTNode* n);
 static void compile_expr(Compiler* c, ASTNode* n);
+static void compile_call(Compiler* c, ASTNode* n);
 
 // === EMIT HELPERS ===
 static void emit(Compiler* c, const char* fmt, ...) {
@@ -170,6 +171,15 @@ static int find_func(Compiler* c, const char* name) {
 }
 
 static int add_func(Compiler* c, const char* name, int offset, int param_count) {
+    // Check if function already exists (forward declaration)
+    int existing = find_func(c, name);
+    if (existing >= 0) {
+        // Update offset if it was a placeholder (-1)
+        if (c->funcs[existing].offset < 0 && offset >= 0) {
+            c->funcs[existing].offset = offset;
+        }
+        return existing;
+    }
     if (c->nfunc >= MAX_FUNCS) return -1;
     strncpy(c->funcs[c->nfunc].name, name, 63);
     c->funcs[c->nfunc].offset = offset;
@@ -419,6 +429,12 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                     }
                 }
             }
+            break;
+        }
+
+        case FN_CALL_NODE: {
+            // Function call as expression - compile the call, result in rax
+            compile_call(c, n);
             break;
         }
 
@@ -1319,6 +1335,19 @@ static void compile_standalone(Compiler* c, ASTNode* ast) {
         stmt = stmt->right;
     }
 
+    // Second pass: register all functions (so they can be called before defined)
+    stmt = ast->left;
+    while (stmt) {
+        if (stmt->type == FN_DECL_NODE || stmt->type == FN_DECL_SPANISH_NODE) {
+            // Register function with placeholder offset (will be patched later)
+            int param_count = 0;
+            ASTNode* p = stmt->params;
+            while (p) { param_count++; p = p->right; }
+            add_func(c, stmt->value, -1, param_count);  // -1 = unknown offset
+        }
+        stmt = stmt->right;
+    }
+
     // Generate _start that calls main and exits
     // _start:
     //   call main
@@ -1332,7 +1361,17 @@ static void compile_standalone(Compiler* c, ASTNode* ast) {
     encode_mov_rax_imm32(c->mc, SYS_EXIT);
     encode_syscall(c->mc);
 
-    // Find and compile main function first
+    // Compile helper functions FIRST (so they're available when main calls them)
+    stmt = ast->left;
+    while (stmt) {
+        if ((stmt->type == FN_DECL_NODE || stmt->type == FN_DECL_SPANISH_NODE) &&
+            stmt->value && strcmp(stmt->value, "main") != 0 && strcmp(stmt->value, "principal") != 0) {
+            compile_func(c, stmt);
+        }
+        stmt = stmt->right;
+    }
+
+    // Now compile main function
     int main_offset = -1;
     stmt = ast->left;
     while (stmt) {
@@ -1348,16 +1387,6 @@ static void compile_standalone(Compiler* c, ASTNode* ast) {
     if (main_offset >= 0) {
         int32_t rel = main_offset - (call_patch + 4);
         memcpy(c->mc->code + call_patch, &rel, 4);
-    }
-
-    // Compile other functions
-    stmt = ast->left;
-    while (stmt) {
-        if ((stmt->type == FN_DECL_NODE || stmt->type == FN_DECL_SPANISH_NODE) &&
-            stmt->value && strcmp(stmt->value, "main") != 0 && strcmp(stmt->value, "principal") != 0) {
-            compile_func(c, stmt);
-        }
-        stmt = stmt->right;
     }
 }
 
