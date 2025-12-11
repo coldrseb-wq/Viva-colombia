@@ -26,6 +26,8 @@ viva_lexer
 viva_parser
 bootstrap/viva_lexer
 bootstrap/viva_parser
+bootstrap/viva_codegen
+bootstrap/viva_bootstrap
 bootstrap/test_*
 
 # Build directories

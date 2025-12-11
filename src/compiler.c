@@ -13,9 +13,10 @@
 #define MAX_VARS 256
 #define MAX_STRS 256
 #define MAX_BUF 65536
-#define MAX_FUNCS 64
+#define MAX_FUNCS 256
 #define MAX_PARAMS 6
-#define MAX_GLOBALS 64
+#define MAX_GLOBALS 128
+#define MAX_CALL_PATCHES 1024
 
 typedef enum { OUT_C, OUT_ASM, OUT_ELF, OUT_STANDALONE } OutMode;
 
@@ -24,6 +25,7 @@ typedef struct {
     int is_str;
     int offset;
     VivaType type;
+    VivaType elem_type;  // Element type for arrays
     int size;
 } Var;
 
@@ -45,9 +47,15 @@ typedef struct {
     char name[64];
     int data_offset;    // Offset in data section
     VivaType type;
+    VivaType elem_type;  // Element type for arrays
     int size;
     int64_t init_value; // Initial value (for constant initializers)
 } GlobalVar;
+
+typedef struct {
+    char func_name[64];  // Name of function being called
+    int patch_offset;    // Offset in code where rel32 needs to be patched
+} CallPatch;
 
 typedef struct {
     FILE* f;
@@ -103,11 +111,12 @@ static int find_var(Compiler* c, const char* name) {
     return -1;
 }
 
-static int add_var(Compiler* c, const char* name, int is_str, VivaType type, int size) {
+static int add_var(Compiler* c, const char* name, int is_str, VivaType type, VivaType elem_type, int size) {
     if (c->nvar >= MAX_VARS) return -1;
     strncpy(c->vars[c->nvar].name, name, 63);
     c->vars[c->nvar].is_str = is_str;
     c->vars[c->nvar].type = type;
+    c->vars[c->nvar].elem_type = elem_type;
     c->vars[c->nvar].size = size;
     c->stack_off -= size;
     c->vars[c->nvar].offset = c->stack_off;
@@ -129,6 +138,11 @@ static VivaType get_var_type(Compiler* c, const char* name) {
     return (i >= 0) ? c->vars[i].type : VIVA_TYPE_ENTERO;
 }
 
+static VivaType get_var_elem_type(Compiler* c, const char* name) {
+    int i = find_var(c, name);
+    return (i >= 0) ? c->vars[i].elem_type : VIVA_TYPE_ENTERO;
+}
+
 // === GLOBAL VARIABLE MANAGEMENT ===
 static int find_global(Compiler* c, const char* name) {
     for (int i = 0; i < c->nglobal; i++)
@@ -136,10 +150,11 @@ static int find_global(Compiler* c, const char* name) {
     return -1;
 }
 
-static int add_global(Compiler* c, const char* name, VivaType type, int size, int64_t init_val) {
+static int add_global(Compiler* c, const char* name, VivaType type, VivaType elem_type, int size, int64_t init_val) {
     if (c->nglobal >= MAX_GLOBALS) return -1;
     strncpy(c->globals[c->nglobal].name, name, 63);
     c->globals[c->nglobal].type = type;
+    c->globals[c->nglobal].elem_type = elem_type;
     c->globals[c->nglobal].size = size;
     c->globals[c->nglobal].data_offset = c->data_size;
     c->globals[c->nglobal].init_value = init_val;
@@ -157,6 +172,11 @@ static int get_global_offset(Compiler* c, const char* name) {
 static VivaType get_global_type(Compiler* c, const char* name) {
     int i = find_global(c, name);
     return (i >= 0) ? c->globals[i].type : VIVA_TYPE_ENTERO;
+}
+
+static VivaType get_global_elem_type(Compiler* c, const char* name) {
+    int i = find_global(c, name);
+    return (i >= 0) ? c->globals[i].elem_type : VIVA_TYPE_ENTERO;
 }
 
 static int is_global_var(Compiler* c, const char* name) {
@@ -631,10 +651,10 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             else if (n->left && n->left->type == IDENTIFIER_NODE) {
                 const char* arr_name = n->left->value;
                 int is_global = is_global_var(c, arr_name);
-                VivaType arr_type = is_global ? get_global_type(c, arr_name) : get_var_type(c, arr_name);
+                VivaType elem_type = is_global ? get_global_elem_type(c, arr_name) : get_var_elem_type(c, arr_name);
 
-                // Determine if byte array (element size 1) or regular (element size 8)
-                int elem_size = (arr_type == VIVA_TYPE_ARREGLO) ? 1 : 8;
+                // Determine element size based on element type
+                int elem_size = (elem_type == VIVA_TYPE_OCTETO) ? 1 : 8;
 
                 // Load index
                 compile_expr(c, n->right);
@@ -898,6 +918,9 @@ static void compile_var(Compiler* c, ASTNode* n) {
     int size = 8;
 
     // Check type annotation
+    VivaType elem_type = VIVA_TYPE_ENTERO;  // Default element type
+
+    // Check type annotation
     if (n->extra && n->extra->type_info) {
         TypeDesc* td = n->extra->type_info;
         type = td->base_type;
@@ -907,7 +930,8 @@ static void compile_var(Compiler* c, ASTNode* n) {
             // Calculate array size: array_size * element_size
             int elem_size = 8;  // Default to 8 bytes
             if (td->element_type) {
-                if (td->element_type->base_type == VIVA_TYPE_OCTETO) elem_size = 1;
+                elem_type = td->element_type->base_type;
+                if (elem_type == VIVA_TYPE_OCTETO) elem_size = 1;
             }
             size = (td->array_size > 0) ? td->array_size * elem_size : 8;
         }
@@ -920,7 +944,7 @@ static void compile_var(Compiler* c, ASTNode* n) {
         if (n->left && n->left->type == NUMBER_NODE && n->left->value) {
             init_val = atoll(n->left->value);
         }
-        add_global(c, n->value, type, size, init_val);
+        add_global(c, n->value, type, elem_type, size, init_val);
         return;
     }
 
@@ -968,7 +992,7 @@ static void compile_var(Compiler* c, ASTNode* n) {
             }
         }
     }
-    add_var(c, n->value, is_str, type, size);
+    add_var(c, n->value, is_str, type, elem_type, size);
 }
 
 // === ASSIGNMENT ===
@@ -985,10 +1009,10 @@ static void compile_assign(Compiler* c, ASTNode* n) {
             if (arr && arr->type == IDENTIFIER_NODE) {
                 const char* arr_name = arr->value;
                 int is_global = is_global_var(c, arr_name);
-                VivaType arr_type = is_global ? get_global_type(c, arr_name) : get_var_type(c, arr_name);
+                VivaType elem_type = is_global ? get_global_elem_type(c, arr_name) : get_var_elem_type(c, arr_name);
 
-                // Determine element size (1 for octeto arrays, 8 otherwise)
-                int elem_size = (arr_type == VIVA_TYPE_ARREGLO) ? 1 : 8;
+                // Determine element size based on element type
+                int elem_size = (elem_type == VIVA_TYPE_OCTETO) ? 1 : 8;
 
                 if (c->mode == OUT_C) {
                     ind(c);
@@ -1261,7 +1285,7 @@ static void compile_func(Compiler* c, ASTNode* n) {
         p = n->params;
         int i = 0;
         while (p && i < 6) {
-            add_var(c, p->value, 0, VIVA_TYPE_ENTERO, 8);
+            add_var(c, p->value, 0, VIVA_TYPE_ENTERO, VIVA_TYPE_ENTERO, 8);
             int off = get_var_off(c, p->value);
             emit(c, "    mov [rbp%+d], %s\n", off, regs[i]);
             p = p->right;
@@ -1282,7 +1306,7 @@ static void compile_func(Compiler* c, ASTNode* n) {
         while (p && i < 6) {
             VivaType ptype = VIVA_TYPE_ENTERO;
             if (p->left && p->left->type_info) ptype = p->left->type_info->base_type;
-            add_var(c, p->value, 0, ptype, 8);
+            add_var(c, p->value, 0, ptype, VIVA_TYPE_ENTERO, 8);
             int off = get_var_off(c, p->value);
 
             switch (i) {

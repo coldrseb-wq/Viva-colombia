@@ -1,0 +1,1304 @@
+// Viva Bootstrap Compiler
+// A self-contained compiler written in Viva that compiles Viva to x86-64 ELF
+
+// ============================================================
+// LEXER
+// ============================================================
+
+decreto src: [8192]octeto;
+decreto src_len: entero = 0;
+decreto pos: entero = 0;
+decreto tok_type: entero = 0;
+decreto tok_buf: [256]octeto;
+decreto tok_len: entero = 0;
+decreto tok_int_val: entero = 0;
+
+// Token types
+// 0=EOF, 1=ID, 2=NUM, 3=STR, 4=(, 5=), 6={, 7=}, 8=;, 9=:, 10=,
+// 11=+, 12=-, 13=*, 14=/, 15==, 16===, 17=<, 18=>, 19=[, 20=]
+
+cancion es_espacio(c: entero): entero {
+    si (c == 32) { retorno 1; }
+    si (c == 9) { retorno 1; }
+    si (c == 10) { retorno 1; }
+    si (c == 13) { retorno 1; }
+    retorno 0;
+}
+
+cancion es_digito(c: entero): entero {
+    si (c >= 48) {
+        si (c <= 57) { retorno 1; }
+    }
+    retorno 0;
+}
+
+cancion es_letra(c: entero): entero {
+    si (c >= 65) {
+        si (c <= 90) { retorno 1; }
+    }
+    si (c >= 97) {
+        si (c <= 122) { retorno 1; }
+    }
+    si (c == 95) { retorno 1; }
+    retorno 0;
+}
+
+cancion saltar_espacios() {
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (c == 47) {
+            si (pos + 1 < src_len) {
+                si (src[pos + 1] == 47) {
+                    pos = pos + 2;
+                    mientras (pos < src_len) {
+                        si (src[pos] == 10) {
+                            pos = pos + 1;
+                            retorno;
+                        }
+                        pos = pos + 1;
+                    }
+                    retorno;
+                }
+            }
+        }
+        si (es_espacio(c) == 0) { retorno; }
+        pos = pos + 1;
+    }
+}
+
+cancion leer_identificador() {
+    tok_len = 0;
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (es_letra(c) == 1) {
+            tok_buf[tok_len] = c;
+            tok_len = tok_len + 1;
+            pos = pos + 1;
+        } sino {
+            si (es_digito(c) == 1) {
+                tok_buf[tok_len] = c;
+                tok_len = tok_len + 1;
+                pos = pos + 1;
+            } sino {
+                tok_buf[tok_len] = 0;
+                retorno;
+            }
+        }
+    }
+    tok_buf[tok_len] = 0;
+}
+
+cancion leer_numero() {
+    tok_len = 0;
+    tok_int_val = 0;
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (es_digito(c) == 1) {
+            tok_buf[tok_len] = c;
+            tok_int_val = tok_int_val * 10 + c - 48;
+            tok_len = tok_len + 1;
+            pos = pos + 1;
+        } sino {
+            tok_buf[tok_len] = 0;
+            retorno;
+        }
+    }
+    tok_buf[tok_len] = 0;
+}
+
+cancion siguiente_token() {
+    saltar_espacios();
+    si (pos >= src_len) { tok_type = 0; retorno; }
+    decreto c: entero = src[pos];
+
+    si (c == 40) { tok_type = 4; pos = pos + 1; retorno; }
+    si (c == 41) { tok_type = 5; pos = pos + 1; retorno; }
+    si (c == 123) { tok_type = 6; pos = pos + 1; retorno; }
+    si (c == 125) { tok_type = 7; pos = pos + 1; retorno; }
+    si (c == 59) { tok_type = 8; pos = pos + 1; retorno; }
+    si (c == 58) { tok_type = 9; pos = pos + 1; retorno; }
+    si (c == 44) { tok_type = 10; pos = pos + 1; retorno; }
+    si (c == 43) { tok_type = 11; pos = pos + 1; retorno; }
+    si (c == 45) { tok_type = 12; pos = pos + 1; retorno; }
+    si (c == 42) { tok_type = 13; pos = pos + 1; retorno; }
+    si (c == 47) { tok_type = 14; pos = pos + 1; retorno; }
+    si (c == 60) { tok_type = 17; pos = pos + 1; retorno; }
+    si (c == 62) { tok_type = 18; pos = pos + 1; retorno; }
+    si (c == 91) { tok_type = 19; pos = pos + 1; retorno; }
+    si (c == 93) { tok_type = 20; pos = pos + 1; retorno; }
+
+    si (c == 61) {
+        pos = pos + 1;
+        si (pos < src_len) {
+            si (src[pos] == 61) {
+                tok_type = 16;
+                pos = pos + 1;
+                retorno;
+            }
+        }
+        tok_type = 15;
+        retorno;
+    }
+
+    si (es_letra(c) == 1) { leer_identificador(); tok_type = 1; retorno; }
+    si (es_digito(c) == 1) { leer_numero(); tok_type = 2; retorno; }
+
+    pos = pos + 1;
+    siguiente_token();
+}
+
+// ============================================================
+// KEYWORD DETECTION
+// ============================================================
+
+cancion is_kw_cancion(): entero {
+    si (tok_len != 7) { retorno 0; }
+    si (tok_buf[0] != 99) { retorno 0; }
+    si (tok_buf[1] != 97) { retorno 0; }
+    si (tok_buf[2] != 110) { retorno 0; }
+    si (tok_buf[3] != 99) { retorno 0; }
+    si (tok_buf[4] != 105) { retorno 0; }
+    si (tok_buf[5] != 111) { retorno 0; }
+    si (tok_buf[6] != 110) { retorno 0; }
+    retorno 1;
+}
+
+cancion is_kw_retorno(): entero {
+    si (tok_len != 7) { retorno 0; }
+    si (tok_buf[0] != 114) { retorno 0; }
+    si (tok_buf[1] != 101) { retorno 0; }
+    si (tok_buf[2] != 116) { retorno 0; }
+    si (tok_buf[3] != 111) { retorno 0; }
+    si (tok_buf[4] != 114) { retorno 0; }
+    si (tok_buf[5] != 110) { retorno 0; }
+    si (tok_buf[6] != 111) { retorno 0; }
+    retorno 1;
+}
+
+cancion is_kw_salir_sys(): entero {
+    si (tok_len != 9) { retorno 0; }
+    si (tok_buf[0] != 115) { retorno 0; }  // s
+    si (tok_buf[1] != 97) { retorno 0; }   // a
+    si (tok_buf[2] != 108) { retorno 0; }  // l
+    si (tok_buf[3] != 105) { retorno 0; }  // i
+    si (tok_buf[4] != 114) { retorno 0; }  // r
+    si (tok_buf[5] != 95) { retorno 0; }   // _
+    si (tok_buf[6] != 115) { retorno 0; }  // s
+    si (tok_buf[7] != 121) { retorno 0; }  // y
+    si (tok_buf[8] != 115) { retorno 0; }  // s
+    retorno 1;
+}
+
+cancion is_kw_escribir_sys(): entero {
+    si (tok_len != 12) { retorno 0; }
+    si (tok_buf[0] != 101) { retorno 0; }  // e
+    si (tok_buf[1] != 115) { retorno 0; }  // s
+    si (tok_buf[2] != 99) { retorno 0; }   // c
+    si (tok_buf[3] != 114) { retorno 0; }  // r
+    si (tok_buf[4] != 105) { retorno 0; }  // i
+    si (tok_buf[5] != 98) { retorno 0; }   // b
+    si (tok_buf[6] != 105) { retorno 0; }  // i
+    si (tok_buf[7] != 114) { retorno 0; }  // r
+    si (tok_buf[8] != 95) { retorno 0; }   // _
+    si (tok_buf[9] != 115) { retorno 0; }  // s
+    si (tok_buf[10] != 121) { retorno 0; } // y
+    si (tok_buf[11] != 115) { retorno 0; } // s
+    retorno 1;
+}
+
+cancion is_kw_decreto(): entero {
+    si (tok_len != 7) { retorno 0; }
+    si (tok_buf[0] != 100) { retorno 0; }
+    si (tok_buf[1] != 101) { retorno 0; }
+    si (tok_buf[2] != 99) { retorno 0; }
+    si (tok_buf[3] != 114) { retorno 0; }
+    si (tok_buf[4] != 101) { retorno 0; }
+    si (tok_buf[5] != 116) { retorno 0; }
+    si (tok_buf[6] != 111) { retorno 0; }
+    retorno 1;
+}
+
+cancion is_kw_si(): entero {
+    si (tok_len != 2) { retorno 0; }
+    si (tok_buf[0] != 115) { retorno 0; }
+    si (tok_buf[1] != 105) { retorno 0; }
+    retorno 1;
+}
+
+cancion is_kw_mientras(): entero {
+    si (tok_len != 8) { retorno 0; }
+    si (tok_buf[0] != 109) { retorno 0; }
+    si (tok_buf[1] != 105) { retorno 0; }
+    si (tok_buf[2] != 101) { retorno 0; }
+    si (tok_buf[3] != 110) { retorno 0; }
+    si (tok_buf[4] != 116) { retorno 0; }
+    si (tok_buf[5] != 114) { retorno 0; }
+    si (tok_buf[6] != 97) { retorno 0; }
+    si (tok_buf[7] != 115) { retorno 0; }
+    retorno 1;
+}
+
+cancion is_kw_sino(): entero {
+    si (tok_len != 4) { retorno 0; }
+    si (tok_buf[0] != 115) { retorno 0; }  // s
+    si (tok_buf[1] != 105) { retorno 0; }  // i
+    si (tok_buf[2] != 110) { retorno 0; }  // n
+    si (tok_buf[3] != 111) { retorno 0; }  // o
+    retorno 1;
+}
+
+// Symbol table for local variables
+decreto sym_names: [512]octeto;
+decreto sym_offs: [32]entero;
+decreto sym_cnt: entero = 0;
+decreto sym_np: entero = 0;
+decreto sym_sp: entero = 0;
+
+// Global storage for loop addresses (to avoid local var issues)
+decreto g_loop_start: entero = 0;
+decreto g_je_addr: entero = 0;
+decreto g_assign_off: entero = 0;
+
+// Function table for tracking function addresses
+decreto fn_names: [2048]octeto;
+decreto fn_addrs: [128]entero;
+decreto fn_cnt: entero = 0;
+decreto fn_np: entero = 0;
+decreto main_addr: entero = 0;  // Entry point (address of main function)
+
+// Forward reference patches (calls to not-yet-defined functions)
+decreto patch_addrs: [256]entero;    // Code addresses to patch
+decreto patch_fn_idx: [256]entero;   // Which function index (in temp name storage)
+decreto patch_cnt: entero = 0;
+
+// Temporary storage for function name being called
+decreto call_name: [64]octeto;
+decreto call_name_len: entero = 0;
+
+cancion fn_add() {
+    // Add current function (tok_buf) to function table with address code_pos
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        fn_names[fn_np] = tok_buf[i];
+        fn_np = fn_np + 1;
+        i = i + 1;
+    }
+    fn_names[fn_np] = 0;
+    fn_np = fn_np + 1;
+    fn_addrs[fn_cnt] = code_pos;
+
+    // Check if this is "main" - set entry point
+    // "main" = 109, 97, 105, 110
+    decreto is_main: entero = 0;
+    si (tok_len == 4) {
+        si (tok_buf[0] == 109) {
+            si (tok_buf[1] == 97) {
+                si (tok_buf[2] == 105) {
+                    si (tok_buf[3] == 110) {
+                        is_main = 1;
+                    }
+                }
+            }
+        }
+    }
+    si (is_main == 1) {
+        main_addr = code_pos;
+    }
+
+    fn_cnt = fn_cnt + 1;
+}
+
+cancion fn_find(): entero {
+    // Find function by name in call_name, return address+1 (0 means not found)
+    decreto i: entero = 0;
+    decreto p: entero = 0;
+    mientras (i < fn_cnt) {
+        decreto j: entero = 0;
+        decreto ok: entero = 1;
+        mientras (fn_names[p + j] != 0) {
+            si (j >= call_name_len) { ok = 0; }
+            si (ok == 1) {
+                si (call_name[j] != fn_names[p + j]) { ok = 0; }
+            }
+            j = j + 1;
+        }
+        si (ok == 1) {
+            si (j == call_name_len) { retorno fn_addrs[i] + 1; }
+        }
+        mientras (fn_names[p] != 0) { p = p + 1; }
+        p = p + 1;
+        i = i + 1;
+    }
+    retorno 0;
+}
+
+cancion save_call_name() {
+    // Copy tok_buf to call_name for later lookup
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        call_name[i] = tok_buf[i];
+        i = i + 1;
+    }
+    call_name_len = tok_len;
+}
+
+cancion sym_reset() {
+    sym_cnt = 0;
+    sym_np = 0;
+    sym_sp = 0;
+}
+
+cancion sym_add(): entero {
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        sym_names[sym_np] = tok_buf[i];
+        sym_np = sym_np + 1;
+        i = i + 1;
+    }
+    sym_names[sym_np] = 0;
+    sym_np = sym_np + 1;
+    sym_sp = sym_sp - 8;
+    sym_offs[sym_cnt] = sym_sp;
+    sym_cnt = sym_cnt + 1;
+    retorno sym_sp;
+}
+
+cancion sym_find(): entero {
+    decreto i: entero = 0;
+    decreto p: entero = 0;
+    mientras (i < sym_cnt) {
+        decreto j: entero = 0;
+        decreto ok: entero = 1;
+        mientras (sym_names[p + j] != 0) {
+            si (j >= tok_len) { ok = 0; }
+            si (ok == 1) {
+                si (tok_buf[j] != sym_names[p + j]) { ok = 0; }
+            }
+            j = j + 1;
+        }
+        si (ok == 1) {
+            si (j == tok_len) { retorno sym_offs[i]; }
+        }
+        mientras (sym_names[p] != 0) { p = p + 1; }
+        p = p + 1;
+        i = i + 1;
+    }
+    retorno 0;
+}
+
+// ============================================================
+// CODE GENERATOR
+// ============================================================
+
+decreto code: [32768]octeto;
+decreto code_pos: entero = 0;
+decreto data: [8192]octeto;
+decreto data_pos: entero = 0;
+
+cancion emit_byte(b: entero) {
+    code[code_pos] = b;
+    code_pos = code_pos + 1;
+}
+
+cancion emit_dword(d: entero) {
+    // Handle negative numbers for two's complement
+    decreto u: entero = d;
+    si (d < 0) {
+        u = d + 4294967296;
+    }
+    code[code_pos] = u;
+    code[code_pos + 1] = u / 256;
+    code[code_pos + 2] = u / 65536;
+    code[code_pos + 3] = u / 16777216;
+    code_pos = code_pos + 4;
+}
+
+cancion emit_qword(q: entero) {
+    emit_dword(q);
+    emit_dword(0);
+}
+
+// push rbp
+cancion emit_push_rbp() { emit_byte(85); }
+
+// mov rbp, rsp
+cancion emit_mov_rbp_rsp() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(229);
+}
+
+// leave
+cancion emit_leave() { emit_byte(201); }
+
+// ret
+cancion emit_ret() { emit_byte(195); }
+
+// mov rax, imm32
+cancion emit_mov_rax_imm32(val: entero) {
+    emit_byte(72);
+    emit_byte(199);
+    emit_byte(192);
+    emit_dword(val);
+}
+
+// mov rdi, rax
+cancion emit_mov_rdi_rax() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(199);
+}
+
+// mov rsi, rax
+cancion emit_mov_rsi_rax() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(198);
+}
+
+// mov rdx, rax
+cancion emit_mov_rdx_rax() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(194);
+}
+
+// xor rax, rax
+cancion emit_xor_rax_rax() {
+    emit_byte(72);
+    emit_byte(49);
+    emit_byte(192);
+}
+
+// syscall
+cancion emit_syscall() {
+    emit_byte(15);
+    emit_byte(5);
+}
+
+// lea rax, [rip+disp32]
+cancion emit_lea_rax_rip_rel(disp: entero) {
+    emit_byte(72);
+    emit_byte(141);
+    emit_byte(5);
+    emit_dword(disp);
+}
+
+// sub rsp, imm32
+cancion emit_sub_rsp(v: entero) {
+    emit_byte(72);
+    emit_byte(129);
+    emit_byte(236);
+    emit_dword(v);
+}
+
+// add rsp, imm32
+cancion emit_add_rsp(v: entero) {
+    emit_byte(72);
+    emit_byte(129);
+    emit_byte(196);
+    emit_dword(v);
+}
+
+// mov rax, [rbp+off]
+cancion emit_load(off: entero) {
+    emit_byte(72);
+    emit_byte(139);
+    emit_byte(133);
+    emit_dword(off);
+}
+
+// mov [rbp+off], rax
+cancion emit_store(off: entero) {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(133);
+    emit_dword(off);
+}
+
+// push rax
+cancion emit_push() { emit_byte(80); }
+
+// pop rax
+cancion emit_pop() { emit_byte(88); }
+
+// pop rcx
+cancion emit_pop_rcx() { emit_byte(89); }
+
+// mov rcx, rax
+cancion emit_mov_rcx() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(193);
+}
+
+// add rax, rcx
+cancion emit_add() {
+    emit_byte(72);
+    emit_byte(1);
+    emit_byte(200);
+}
+
+// sub rax, rcx
+cancion emit_sub() {
+    emit_byte(72);
+    emit_byte(41);
+    emit_byte(200);
+}
+
+// imul rax, rcx
+cancion emit_mul() {
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(175);
+    emit_byte(193);
+}
+
+// cqo; idiv rcx
+cancion emit_div() {
+    emit_byte(72);
+    emit_byte(153);
+    emit_byte(72);
+    emit_byte(247);
+    emit_byte(249);
+}
+
+// cmp rax, rcx (for correct ordering: left < right)
+cancion emit_cmp() {
+    emit_byte(72);
+    emit_byte(57);
+    emit_byte(200);
+}
+
+// sete al; movzx rax, al
+cancion emit_sete() {
+    emit_byte(15);
+    emit_byte(148);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// setne al; movzx rax, al
+cancion emit_setne() {
+    emit_byte(15);
+    emit_byte(149);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// setl al; movzx rax, al
+cancion emit_setl() {
+    emit_byte(15);
+    emit_byte(156);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// setg al; movzx rax, al
+cancion emit_setg() {
+    emit_byte(15);
+    emit_byte(159);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// test rax, rax
+cancion emit_testrax() {
+    emit_byte(72);
+    emit_byte(133);
+    emit_byte(192);
+}
+
+// je rel32 (returns patch addr)
+cancion emit_je(): entero {
+    emit_byte(15);
+    emit_byte(132);
+    decreto addr: entero = code_pos;
+    emit_dword(0);
+    retorno addr;
+}
+
+// jne rel32 (returns patch addr)
+cancion emit_jne(): entero {
+    emit_byte(15);
+    emit_byte(133);
+    decreto addr: entero = code_pos;
+    emit_dword(0);
+    retorno addr;
+}
+
+// jmp rel32 (returns patch addr)
+cancion emit_jmp(): entero {
+    emit_byte(233);
+    decreto addr: entero = code_pos;
+    emit_dword(0);
+    retorno addr;
+}
+
+// Patch a jump target at addr to point to current code_pos
+cancion emit_patch(addr: entero) {
+    decreto rel: entero = code_pos - addr - 4;
+    // Handle negative offsets for backward jumps
+    decreto u: entero = rel;
+    si (rel < 0) {
+        u = rel + 4294967296;
+    }
+    code[addr] = u;
+    code[addr + 1] = u / 256;
+    code[addr + 2] = u / 65536;
+    code[addr + 3] = u / 16777216;
+}
+
+// setle al; movzx rax, al
+cancion emit_setle() {
+    emit_byte(15);
+    emit_byte(158);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// setge al; movzx rax, al
+cancion emit_setge() {
+    emit_byte(15);
+    emit_byte(157);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// call rel32 (returns patch addr)
+cancion emit_call(): entero {
+    emit_byte(232);
+    decreto addr: entero = code_pos;
+    emit_dword(0);
+    retorno addr;
+}
+
+// call with relative offset to target address
+cancion emit_call_rel(target: entero) {
+    emit_byte(232);
+    decreto rel: entero = target - code_pos - 4;
+    emit_dword(rel);
+}
+
+// mov rdi, rax (for first argument)
+cancion emit_mov_rdi_from_rax() {
+    emit_byte(72);   // REX.W
+    emit_byte(137);  // mov r/m64, r64
+    emit_byte(199);  // ModRM: rdi <- rax
+}
+
+// mov rsi, rax (for second argument)
+cancion emit_mov_rsi_from_rax() {
+    emit_byte(72);   // REX.W
+    emit_byte(137);  // mov r/m64, r64
+    emit_byte(198);  // ModRM: rsi <- rax
+}
+
+// cmp rax, 0
+cancion emit_cmp_rax_0() {
+    emit_byte(72);
+    emit_byte(131);
+    emit_byte(248);
+    emit_byte(0);
+}
+
+// ============================================================
+// STRING DATA
+// ============================================================
+
+decreto str_data: [4096]octeto;
+decreto str_data_pos: entero = 0;
+
+cancion add_string(s: entero, len: entero): entero {
+    decreto start: entero = str_data_pos;
+    decreto i: entero = 0;
+    mientras (i < len) {
+        str_data[str_data_pos] = src[s + i];
+        str_data_pos = str_data_pos + 1;
+        i = i + 1;
+    }
+    retorno start;
+}
+
+// ============================================================
+// SIMPLE PARSER + CODE GENERATOR
+// ============================================================
+
+// Forward declaration placeholder
+decreto parse_depth: entero = 0;
+
+// Compile a primary expression (number, variable, function call, or parenthesized)
+cancion compile_primary() {
+    si (tok_type == 2) {
+        // Number literal
+        emit_mov_rax_imm32(tok_int_val);
+        siguiente_token();
+        retorno;
+    }
+    si (tok_type == 4) {
+        // Parenthesized: (expr)
+        siguiente_token();  // skip (
+        compile_comparison();
+        si (tok_type == 5) { siguiente_token(); }  // skip )
+        retorno;
+    }
+    si (tok_type == 1) {
+        // Identifier - could be variable or function call
+        // First check if it's a local variable
+        decreto off: entero = sym_find();
+
+        // Save identifier name for potential function call
+        save_call_name();
+        siguiente_token();  // skip identifier
+
+        // Check if followed by '(' - then it's a function call
+        si (tok_type == 4) {
+            // Function call: name(args)
+            // Look up function BEFORE compiling arguments (args compilation clobbers call_name)
+            decreto fn_addr: entero = fn_find();
+
+            siguiente_token();  // skip (
+
+            // Compile arguments (up to 2 for now)
+            decreto arg_count: entero = 0;
+            si (tok_type != 5) {
+                // First argument -> rdi
+                compile_term();
+                emit_mov_rdi_from_rax();
+                arg_count = 1;
+
+                si (tok_type == 10) {
+                    // Second argument -> rsi
+                    siguiente_token();  // skip ,
+                    compile_comparison();
+                    emit_mov_rsi_from_rax();
+                    arg_count = 2;
+                }
+            }
+            si (tok_type == 5) { siguiente_token(); }  // skip )
+
+            // Emit call
+            si (fn_addr != 0) {
+                emit_call_rel(fn_addr - 1);  // -1 because fn_find returns addr+1
+            } sino {
+                // Forward reference - emit call with 0 offset (TODO: patch later)
+                emit_call();
+            }
+            retorno;
+        }
+
+        // Not a function call - load variable
+        si (off != 0) {
+            emit_load(off);
+        } sino {
+            // Unknown identifier, emit 0
+            emit_xor_rax_rax();
+        }
+        retorno;
+    }
+    // Default: 0
+    emit_xor_rax_rax();
+}
+
+// Compile term: primary ((* | /) primary)*
+cancion compile_term() {
+    compile_primary();
+    mientras (tok_type == 13) {
+        // * multiply
+        emit_push();
+        siguiente_token();
+        compile_primary();
+        emit_mov_rcx();
+        emit_pop();
+        emit_mul();
+    }
+    mientras (tok_type == 14) {
+        // / divide
+        emit_push();
+        siguiente_token();
+        compile_primary();
+        emit_mov_rcx();
+        emit_pop();
+        emit_div();
+    }
+}
+
+// Compile additive: term ((+ | -) term)*
+cancion compile_additive() {
+    compile_term();
+    mientras (tok_type == 11) {
+        // + add
+        emit_push();
+        siguiente_token();
+        compile_term();
+        emit_mov_rcx();
+        emit_pop();
+        emit_add();
+    }
+    mientras (tok_type == 12) {
+        // - subtract
+        emit_push();
+        siguiente_token();
+        compile_term();
+        emit_mov_rcx();
+        emit_pop();
+        emit_sub();
+    }
+}
+
+// Compile comparison: additive ((<|>|==|!=|<=|>=) additive)?
+cancion compile_comparison() {
+    compile_additive();
+    si (tok_type == 16) {
+        // == equal
+        emit_push();
+        siguiente_token();
+        compile_additive();
+        emit_mov_rcx();
+        emit_pop();
+        emit_cmp();
+        emit_sete();
+        retorno;
+    }
+    si (tok_type == 17) {
+        // < less than
+        emit_push();
+        siguiente_token();
+        compile_additive();
+        emit_mov_rcx();
+        emit_pop();
+        emit_cmp();
+        emit_setl();
+        retorno;
+    }
+    si (tok_type == 18) {
+        // > greater than
+        emit_push();
+        siguiente_token();
+        compile_additive();
+        emit_mov_rcx();
+        emit_pop();
+        emit_cmp();
+        emit_setg();
+        retorno;
+    }
+}
+
+// Legacy wrapper
+cancion compile_expr(): entero {
+    si (tok_type == 2) {
+        decreto val: entero = tok_int_val;
+        siguiente_token();
+        retorno val;
+    }
+    retorno 0;
+}
+
+cancion compile_syscall_exit() {
+    // salir_sys(code)
+    siguiente_token();  // skip salir_sys
+    si (tok_type == 4) { siguiente_token(); }  // skip (
+    compile_comparison();  // compile expression into rax
+    si (tok_type == 5) { siguiente_token(); }  // skip )
+    si (tok_type == 8) { siguiente_token(); }  // skip ;
+
+    emit_mov_rdi_rax();
+    emit_mov_rax_imm32(60);
+    emit_syscall();
+}
+
+cancion compile_syscall_write() {
+    // escribir_sys(fd, str, len)
+    siguiente_token();  // skip escribir_sys
+    si (tok_type == 4) { siguiente_token(); }  // skip (
+
+    // fd
+    decreto fd: entero = compile_expr();
+    si (tok_type == 10) { siguiente_token(); }  // skip ,
+
+    // Skip string for now (assume quoted literal)
+    // For simplicity, just use pre-loaded data
+    si (tok_type == 10) { siguiente_token(); }  // skip string & ,
+
+    // len
+    decreto len: entero = compile_expr();
+    si (tok_type == 5) { siguiente_token(); }  // skip )
+    si (tok_type == 8) { siguiente_token(); }  // skip ;
+
+    // Generate write syscall
+    emit_mov_rax_imm32(fd);
+    emit_mov_rdi_rax();
+    // lea rsi, [data]
+    decreto cur: entero = code_pos;
+    decreto rip_rel: entero = 65536 - cur - 7;
+    emit_lea_rax_rip_rel(rip_rel);
+    emit_mov_rsi_rax();
+    emit_mov_rax_imm32(len);
+    emit_mov_rdx_rax();
+    emit_mov_rax_imm32(1);
+    emit_syscall();
+}
+
+cancion compile_block();
+
+cancion compile_statement() {
+    si (tok_type == 1) {
+        si (is_kw_salir_sys() == 1) {
+            compile_syscall_exit();
+            retorno;
+        }
+        si (is_kw_escribir_sys() == 1) {
+            compile_syscall_write();
+            retorno;
+        }
+        si (is_kw_retorno() == 1) {
+            siguiente_token();  // skip retorno
+            compile_comparison();
+            si (tok_type == 8) { siguiente_token(); }  // skip ;
+            emit_leave();
+            emit_ret();
+            retorno;
+        }
+        si (is_kw_decreto() == 1) {
+            // Variable declaration: decreto name: type = expr;
+            siguiente_token();  // skip decreto
+            decreto off: entero = sym_add();
+            siguiente_token();  // skip name
+            si (tok_type == 9) { siguiente_token(); }  // skip :
+            si (tok_type == 1) { siguiente_token(); }  // skip type
+            si (tok_type == 15) {
+                // = initializer
+                siguiente_token();  // skip =
+                compile_comparison();
+                emit_store(off);
+            } sino {
+                // Initialize to 0
+                emit_xor_rax_rax();
+                emit_store(off);
+            }
+            si (tok_type == 8) { siguiente_token(); }  // skip ;
+            retorno;
+        }
+        si (is_kw_si() == 1) {
+            // if statement: si (cond) { body } sino { else }
+            siguiente_token();  // skip si
+            si (tok_type == 4) { siguiente_token(); }  // skip (
+            compile_comparison();
+            si (tok_type == 5) { siguiente_token(); }  // skip )
+
+            emit_cmp_rax_0();
+            decreto je_addr: entero = emit_je();
+
+            si (tok_type == 6) { siguiente_token(); }  // skip {
+            mientras (tok_type != 7) {
+                compile_statement();
+                si (tok_type == 0) { retorno; }
+            }
+            siguiente_token();  // skip }
+
+            // Check for else
+            si (tok_type == 1) {
+                si (is_kw_sino() == 1) {
+                    decreto jmp_addr: entero = emit_jmp();
+                    emit_patch(je_addr);
+                    siguiente_token();  // skip sino
+                    si (tok_type == 6) { siguiente_token(); }  // skip {
+                    mientras (tok_type != 7) {
+                        compile_statement();
+                        si (tok_type == 0) { retorno; }
+                    }
+                    siguiente_token();  // skip }
+                    emit_patch(jmp_addr);
+                    retorno;
+                }
+            }
+            emit_patch(je_addr);
+            retorno;
+        }
+        si (is_kw_mientras() == 1) {
+            // while loop: mientras (cond) { body }
+            siguiente_token();  // skip mientras
+            g_loop_start = code_pos;
+            si (tok_type == 4) { siguiente_token(); }  // skip (
+            compile_comparison();
+            si (tok_type == 5) { siguiente_token(); }  // skip )
+
+            emit_cmp_rax_0();
+            g_je_addr = emit_je();
+
+            si (tok_type == 6) { siguiente_token(); }  // skip {
+            mientras (tok_type != 7) {
+                compile_statement();
+                si (tok_type == 0) { retorno; }
+            }
+            siguiente_token();  // skip }
+
+            // Jump back to loop start
+            emit_byte(233);  // jmp rel32
+            decreto rel: entero = g_loop_start - code_pos - 4;
+            emit_dword(rel);
+            emit_patch(g_je_addr);
+            retorno;
+        }
+        // Check for assignment or function call
+        g_assign_off = sym_find();
+        save_call_name();  // Save identifier for potential function call
+        siguiente_token();  // consume identifier
+        si (tok_type == 15) {
+            // Assignment: identifier = expr
+            siguiente_token();  // skip =
+            compile_comparison();
+            emit_store(g_assign_off);
+            si (tok_type == 8) { siguiente_token(); }  // skip ;
+            retorno;
+        }
+        si (tok_type == 4) {
+            // Function call as statement: identifier(args);
+            decreto fn_addr: entero = fn_find();
+            siguiente_token();  // skip (
+
+            // Compile arguments (up to 2 for now)
+            si (tok_type != 5) {
+                // First argument -> rdi
+                compile_comparison();
+                emit_mov_rdi_from_rax();
+
+                si (tok_type == 10) {
+                    // Second argument -> rsi
+                    siguiente_token();  // skip ,
+                    compile_comparison();
+                    emit_mov_rsi_from_rax();
+                }
+            }
+            si (tok_type == 5) { siguiente_token(); }  // skip )
+
+            // Emit call
+            si (fn_addr != 0) {
+                emit_call_rel(fn_addr - 1);  // -1 because fn_find returns addr+1
+            } sino {
+                emit_call();
+            }
+            si (tok_type == 8) { siguiente_token(); }  // skip ;
+            retorno;
+        }
+        // Unknown identifier statement, skip rest
+        si (tok_type == 8) { siguiente_token(); }
+        retorno;
+    }
+    // Skip unknown
+    siguiente_token();
+}
+
+cancion compile_function() {
+    // cancion name(params) { ... }
+    sym_reset();  // Reset symbol table for new function
+    siguiente_token();  // skip cancion
+
+    // Register function name and address BEFORE emitting prologue
+    fn_add();  // Records tok_buf (function name) with current code_pos
+    siguiente_token();  // skip name
+
+    si (tok_type == 4) { siguiente_token(); }  // skip (
+
+    // Parse parameters: name: type, name: type, ...
+    decreto param_count: entero = 0;
+    mientras (tok_type != 5) {
+        si (tok_type == 1) {
+            // Parameter name - add to symbol table
+            sym_add();
+            param_count = param_count + 1;
+            siguiente_token();  // skip name
+            si (tok_type == 9) {
+                siguiente_token();  // skip :
+                si (tok_type == 1) {
+                    siguiente_token();  // skip type
+                }
+            }
+        } sino {
+            siguiente_token();  // skip , or other
+        }
+    }
+    si (tok_type == 5) { siguiente_token(); }  // skip )
+
+    // Skip return type if present
+    si (tok_type == 9) {
+        siguiente_token();  // skip :
+        si (tok_type == 1) { siguiente_token(); }  // skip type
+    }
+    si (tok_type == 6) { siguiente_token(); }  // skip {
+
+    emit_push_rbp();
+    emit_mov_rbp_rsp();
+    emit_sub_rsp(256);  // Reserve stack space
+
+    // Copy parameters from registers to stack (System V ABI)
+    // rdi=arg1, rsi=arg2, rdx=arg3, rcx=arg4, r8=arg5, r9=arg6
+    si (param_count > 0) {
+        // mov [rbp-8], rdi
+        emit_byte(72);
+        emit_byte(137);
+        emit_byte(125);
+        emit_byte(248);  // -8
+    }
+    si (param_count > 1) {
+        // mov [rbp-16], rsi
+        emit_byte(72);
+        emit_byte(137);
+        emit_byte(117);
+        emit_byte(240);  // -16
+    }
+
+    mientras (tok_type != 7) {
+        compile_statement();
+        si (tok_type == 0) { retorno; }
+    }
+    siguiente_token();  // skip }
+
+    emit_xor_rax_rax();  // Default return 0
+    emit_leave();
+    emit_ret();
+}
+
+cancion compile_program() {
+    siguiente_token();
+    mientras (tok_type != 0) {
+        si (tok_type == 1) {
+            si (is_kw_cancion() == 1) {
+                compile_function();
+            } sino {
+                siguiente_token();
+            }
+        } sino {
+            siguiente_token();
+        }
+    }
+}
+
+// ============================================================
+// ELF GENERATION
+// ============================================================
+
+decreto elf_buf: [131072]octeto;
+decreto elf_pos: entero = 0;
+
+cancion elf_byte(b: entero) {
+    elf_buf[elf_pos] = b;
+    elf_pos = elf_pos + 1;
+}
+
+cancion elf_word(w: entero) {
+    elf_buf[elf_pos] = w;
+    elf_buf[elf_pos + 1] = w / 256;
+    elf_pos = elf_pos + 2;
+}
+
+cancion elf_dword(d: entero) {
+    elf_buf[elf_pos] = d;
+    elf_buf[elf_pos + 1] = d / 256;
+    elf_buf[elf_pos + 2] = d / 65536;
+    elf_buf[elf_pos + 3] = d / 16777216;
+    elf_pos = elf_pos + 4;
+}
+
+cancion elf_qword(q: entero) {
+    elf_dword(q);
+    elf_dword(0);
+}
+
+cancion gen_elf_header() {
+    elf_byte(127); elf_byte(69); elf_byte(76); elf_byte(70);
+    elf_byte(2); elf_byte(1); elf_byte(1); elf_byte(0);
+    elf_byte(0); elf_byte(0); elf_byte(0); elf_byte(0);
+    elf_byte(0); elf_byte(0); elf_byte(0); elf_byte(0);
+    elf_word(2); elf_word(62); elf_dword(1);
+    elf_qword(4198400 + main_addr);  // Entry point = code base + main offset
+    elf_qword(64);
+    elf_qword(0);
+    elf_dword(0);
+    elf_word(64); elf_word(56); elf_word(2);
+    elf_word(0); elf_word(0); elf_word(0);
+}
+
+cancion gen_program_headers() {
+    elf_dword(1); elf_dword(5);
+    elf_qword(4096);
+    elf_qword(4198400); elf_qword(4198400);
+    elf_qword(code_pos); elf_qword(code_pos);
+    elf_qword(4096);
+
+    elf_dword(1); elf_dword(6);
+    elf_qword(69632);
+    elf_qword(4263936); elf_qword(4263936);
+    elf_qword(data_pos); elf_qword(data_pos);
+    elf_qword(4096);
+}
+
+cancion gen_elf() {
+    gen_elf_header();
+    gen_program_headers();
+
+    mientras (elf_pos < 4096) { elf_byte(0); }
+
+    decreto i: entero = 0;
+    mientras (i < code_pos) {
+        elf_byte(code[i]);
+        i = i + 1;
+    }
+
+    mientras (elf_pos < 69632) { elf_byte(0); }
+
+    i = 0;
+    mientras (i < data_pos) {
+        elf_byte(data[i]);
+        i = i + 1;
+    }
+}
+
+// ============================================================
+// MAIN
+// ============================================================
+
+cancion principal() {
+    escribir_sys(2, "Viva Bootstrap Compiler\n", 24);
+    escribir_sys(2, "Reading source from stdin...\n", 29);
+
+    // Read source from stdin
+    src_len = leer_sys(0, src, 8192);
+
+    si (src_len < 1) {
+        escribir_sys(2, "Error: no input\n", 16);
+        salir_sys(1);
+    }
+
+    escribir_sys(2, "Compiling...\n", 13);
+
+    compile_program();
+
+    escribir_sys(2, "Generating ELF...\n", 18);
+
+    gen_elf();
+
+    escribir_sys(2, "Writing output...\n", 18);
+
+    escribir_sys(1, elf_buf, elf_pos);
+
+    salir_sys(0);
+}
