@@ -18,10 +18,10 @@ decreto tok_int_val: entero = 0;
 // 11=+, 12=-, 13=*, 14=/, 15==, 16===, 17=<, 18=>, 19=[, 20=]
 // 21=!=, 22=<=, 23=>=
 
-// String literal data storage
-decreto str_lit_data: [8192]octeto;
-decreto str_lit_offsets: [64]entero;
-decreto str_lit_lens: [64]entero;
+// String literal data storage - sized for self-hosting (compiler has many strings)
+decreto str_lit_data: [32768]octeto;
+decreto str_lit_offsets: [256]entero;
+decreto str_lit_lens: [256]entero;
 decreto str_lit_count: entero = 0;
 decreto str_lit_pos: entero = 0;
 decreto tok_str_idx: entero = 0;
@@ -121,10 +121,22 @@ cancion leer_cadena() {
     decreto start: entero = str_lit_pos;
     tok_len = 0;
     mientras (pos < src_len) {
+        // Bounds check - prevent buffer overflow (32768 bytes, 256 entries)
+        si (str_lit_pos >= 32000) { retorno; }
+        si (str_lit_count >= 250) { retorno; }
+
         decreto c: entero = src[pos];
         si (c == 34) {
             // Closing quote
             pos = pos + 1;
+            str_lit_offsets[str_lit_count] = start;
+            str_lit_lens[str_lit_count] = tok_len;
+            tok_str_idx = str_lit_count;
+            str_lit_count = str_lit_count + 1;
+            retorno;
+        }
+        // Null byte in string = unterminated, stop
+        si (c == 0) {
             str_lit_offsets[str_lit_count] = start;
             str_lit_lens[str_lit_count] = tok_len;
             tok_str_idx = str_lit_count;
@@ -253,16 +265,17 @@ cancion siguiente_token() {
                 retorno;
             }
         }
-        // Just ! (not operator) - skip for now, treat as unknown
-        siguiente_token();
+        // Just ! (not operator) - treat as token type 24 (unary not)
+        tok_type = 24;
         retorno;
     }
 
     si (es_letra(c) == 1) { leer_identificador(); tok_type = 1; retorno; }
     si (es_digito(c) == 1) { leer_numero(); tok_type = 2; retorno; }
 
+    // Unknown character - skip it without recursion to prevent stack overflow
     pos = pos + 1;
-    siguiente_token();
+    tok_type = 25;  // Unknown token type
 }
 
 // ============================================================
@@ -415,18 +428,19 @@ decreto g_je_addr: entero = 0;
 decreto g_assign_off: entero = 0;
 decreto g_arr_elem_sz: entero = 1;  // Element size for current array access
 
-// Function table for tracking function addresses
-decreto fn_names: [2048]octeto;
-decreto fn_addrs: [128]entero;
+// Function table for tracking function addresses - sized for self-hosting
+decreto fn_names: [4096]octeto;
+decreto fn_addrs: [256]entero;
 decreto fn_cnt: entero = 0;
 decreto fn_np: entero = 0;
 decreto main_addr: entero = 0;  // Entry point (address of main function)
+decreto entry_patch_addr: entero = 0;  // Address to patch for entry stub call
 
 // Forward reference patches (calls to not-yet-defined functions)
-decreto patch_addrs: [256]entero;    // Code addresses to patch
-decreto patch_names: [4096]octeto;   // Names of functions to patch (null-separated)
-decreto patch_name_lens: [256]entero; // Length of each patch function name
-decreto patch_name_starts: [256]entero; // Start position in patch_names for each patch
+decreto patch_addrs: [512]entero;    // Code addresses to patch
+decreto patch_names: [8192]octeto;   // Names of functions to patch (null-separated)
+decreto patch_name_lens: [512]entero; // Length of each patch function name
+decreto patch_name_starts: [512]entero; // Start position in patch_names for each patch
 decreto patch_cnt: entero = 0;
 decreto patch_np: entero = 0;
 
@@ -676,9 +690,10 @@ cancion sym_elem_size(): entero {
 // CODE GENERATOR
 // ============================================================
 
-decreto code: [65536]octeto;
+// Code and data buffers - sized for self-hosting (compiler generates ~50KB code)
+decreto code: [131072]octeto;
 decreto code_pos: entero = 0;
-decreto data: [8192]octeto;
+decreto data: [16384]octeto;
 decreto data_pos: entero = 0;
 
 cancion emit_byte(b: entero) {
@@ -1975,12 +1990,12 @@ cancion compile_function() {
     emit_ret();
 }
 
-// Global variable tracking
-decreto glob_names: [2048]octeto;
-decreto glob_offs: [64]entero;
-decreto glob_sizes: [64]entero;
-decreto glob_is_arr: [64]entero;  // 1 if array, 0 if scalar
-decreto glob_elem_sizes: [64]entero;  // Element size: 1 for octeto, 8 for entero
+// Global variable tracking - sized for self-hosting (compiler has ~60 globals)
+decreto glob_names: [4096]octeto;
+decreto glob_offs: [128]entero;
+decreto glob_sizes: [128]entero;
+decreto glob_is_arr: [128]entero;  // 1 if array, 0 if scalar
+decreto glob_elem_sizes: [128]entero;  // Element size: 1 for octeto, 8 for entero
 decreto glob_cnt: entero = 0;
 decreto glob_np: entero = 0;
 decreto glob_data_pos: entero = 0;
@@ -2157,9 +2172,40 @@ cancion compile_program() {
             siguiente_token();
         }
     }
+    escribir_sys(2, "Pass2 done\n", 11);
 
     // Resolve any forward references
+    escribir_sys(2, "Resolving\n", 10);
     resolve_patches();
+    escribir_sys(2, "Resolved\n", 9);
+
+    // Now emit entry stub at end of code - main_addr is already known
+    // Save entry stub address for ELF header
+    entry_patch_addr = code_pos;  // This is where our entry point will be
+
+    // Calculate relative offset to main_addr from after the call instruction
+    // call is at entry_patch_addr, so next instr is at entry_patch_addr + 5
+    decreto entry_rel: entero = main_addr - entry_patch_addr - 5;
+
+    // Emit entry stub: call principal, then exit with return value
+    emit_byte(232);  // call rel32
+    // Emit the relative offset (signed 32-bit)
+    si (entry_rel < 0) {
+        decreto u: entero = entry_rel + 4294967296;
+        emit_byte(u);
+        emit_byte(u / 256);
+        emit_byte(u / 65536);
+        emit_byte(u / 16777216);
+    } sino {
+        emit_byte(entry_rel);
+        emit_byte(entry_rel / 256);
+        emit_byte(entry_rel / 65536);
+        emit_byte(entry_rel / 16777216);
+    }
+    emit_byte(72); emit_byte(137); emit_byte(199);  // mov rdi, rax
+    emit_byte(72); emit_byte(199); emit_byte(192);  // mov rax, imm32
+    emit_byte(60); emit_byte(0); emit_byte(0); emit_byte(0);  // 60 (sys_exit)
+    emit_byte(15); emit_byte(5);  // syscall
 }
 
 // ============================================================
@@ -2204,7 +2250,7 @@ cancion gen_elf_header() {
     elf_byte(0); elf_byte(0); elf_byte(0); elf_byte(0);
     elf_byte(0); elf_byte(0); elf_byte(0); elf_byte(0);
     elf_word(2); elf_word(62); elf_dword(1);
-    elf_qword(4198400 + main_addr);  // Entry point = code base + main offset
+    elf_qword(4198400 + entry_patch_addr);  // Entry point = code base + entry stub offset
     elf_qword(64);
     elf_qword(0);
     elf_dword(0);
@@ -2268,21 +2314,33 @@ cancion gen_elf() {
 // MAIN
 // ============================================================
 
+cancion find_src_len(): entero {
+    // Scan backwards from end of buffer to find actual input length
+    // This avoids needing leer_sys return value (which crashes in self-hosting)
+    decreto i: entero = 131071;
+    mientras (i > 0) {
+        si (src[i] != 0) {
+            retorno i + 1;
+        }
+        i = i - 1;
+    }
+    si (src[0] != 0) { retorno 1; }
+    retorno 0;
+}
+
 cancion principal() {
     escribir_sys(2, "Viva Bootstrap Compiler\n", 24);
     escribir_sys(2, "Reading source from stdin...\n", 29);
 
     // Read source from stdin
     leer_sys(0, src, 131072);
-    // NOTE: leer_sys-as-expression crashes during self-compilation due to
-    // what appears to be a stack overflow in recursive compilation.
-    // Workaround: check if first byte is non-zero to detect input.
-    si (src[0] == 0) {
+
+    // Find actual input length by scanning for last non-null byte
+    src_len = find_src_len();
+    si (src_len == 0) {
         escribir_sys(2, "Error: no input\n", 16);
         salir_sys(1);
     }
-    // Set src_len to max for now (lexer will stop at EOF)
-    src_len = 131072;
 
     escribir_sys(2, "Compiling...\n", 13);
 
