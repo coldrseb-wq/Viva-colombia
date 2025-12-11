@@ -1,0 +1,581 @@
+// Viva Bootstrap Compiler
+// A self-contained compiler written in Viva that compiles Viva to x86-64 ELF
+
+// ============================================================
+// LEXER
+// ============================================================
+
+decreto src: [8192]octeto;
+decreto src_len: entero = 0;
+decreto pos: entero = 0;
+decreto tok_type: entero = 0;
+decreto tok_buf: [256]octeto;
+decreto tok_len: entero = 0;
+decreto tok_int_val: entero = 0;
+
+// Token types
+// 0=EOF, 1=ID, 2=NUM, 3=STR, 4=(, 5=), 6={, 7=}, 8=;, 9=:, 10=,
+// 11=+, 12=-, 13=*, 14=/, 15==, 16===, 17=<, 18=>, 19=[, 20=]
+
+cancion es_espacio(c: entero): entero {
+    si (c == 32) { retorno 1; }
+    si (c == 9) { retorno 1; }
+    si (c == 10) { retorno 1; }
+    si (c == 13) { retorno 1; }
+    retorno 0;
+}
+
+cancion es_digito(c: entero): entero {
+    si (c >= 48) {
+        si (c <= 57) { retorno 1; }
+    }
+    retorno 0;
+}
+
+cancion es_letra(c: entero): entero {
+    si (c >= 65) {
+        si (c <= 90) { retorno 1; }
+    }
+    si (c >= 97) {
+        si (c <= 122) { retorno 1; }
+    }
+    si (c == 95) { retorno 1; }
+    retorno 0;
+}
+
+cancion saltar_espacios() {
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (c == 47) {
+            si (pos + 1 < src_len) {
+                si (src[pos + 1] == 47) {
+                    pos = pos + 2;
+                    mientras (pos < src_len) {
+                        si (src[pos] == 10) {
+                            pos = pos + 1;
+                            retorno;
+                        }
+                        pos = pos + 1;
+                    }
+                    retorno;
+                }
+            }
+        }
+        si (es_espacio(c) == 0) { retorno; }
+        pos = pos + 1;
+    }
+}
+
+cancion leer_identificador() {
+    tok_len = 0;
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (es_letra(c) == 1) {
+            tok_buf[tok_len] = c;
+            tok_len = tok_len + 1;
+            pos = pos + 1;
+        } sino {
+            si (es_digito(c) == 1) {
+                tok_buf[tok_len] = c;
+                tok_len = tok_len + 1;
+                pos = pos + 1;
+            } sino {
+                tok_buf[tok_len] = 0;
+                retorno;
+            }
+        }
+    }
+    tok_buf[tok_len] = 0;
+}
+
+cancion leer_numero() {
+    tok_len = 0;
+    tok_int_val = 0;
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (es_digito(c) == 1) {
+            tok_buf[tok_len] = c;
+            tok_int_val = tok_int_val * 10 + c - 48;
+            tok_len = tok_len + 1;
+            pos = pos + 1;
+        } sino {
+            tok_buf[tok_len] = 0;
+            retorno;
+        }
+    }
+    tok_buf[tok_len] = 0;
+}
+
+cancion siguiente_token() {
+    saltar_espacios();
+    si (pos >= src_len) { tok_type = 0; retorno; }
+    decreto c: entero = src[pos];
+
+    si (c == 40) { tok_type = 4; pos = pos + 1; retorno; }
+    si (c == 41) { tok_type = 5; pos = pos + 1; retorno; }
+    si (c == 123) { tok_type = 6; pos = pos + 1; retorno; }
+    si (c == 125) { tok_type = 7; pos = pos + 1; retorno; }
+    si (c == 59) { tok_type = 8; pos = pos + 1; retorno; }
+    si (c == 58) { tok_type = 9; pos = pos + 1; retorno; }
+    si (c == 44) { tok_type = 10; pos = pos + 1; retorno; }
+    si (c == 43) { tok_type = 11; pos = pos + 1; retorno; }
+    si (c == 45) { tok_type = 12; pos = pos + 1; retorno; }
+    si (c == 42) { tok_type = 13; pos = pos + 1; retorno; }
+    si (c == 47) { tok_type = 14; pos = pos + 1; retorno; }
+    si (c == 60) { tok_type = 17; pos = pos + 1; retorno; }
+    si (c == 62) { tok_type = 18; pos = pos + 1; retorno; }
+    si (c == 91) { tok_type = 19; pos = pos + 1; retorno; }
+    si (c == 93) { tok_type = 20; pos = pos + 1; retorno; }
+
+    si (c == 61) {
+        pos = pos + 1;
+        si (pos < src_len) {
+            si (src[pos] == 61) {
+                tok_type = 16;
+                pos = pos + 1;
+                retorno;
+            }
+        }
+        tok_type = 15;
+        retorno;
+    }
+
+    si (es_letra(c) == 1) { leer_identificador(); tok_type = 1; retorno; }
+    si (es_digito(c) == 1) { leer_numero(); tok_type = 2; retorno; }
+
+    pos = pos + 1;
+    siguiente_token();
+}
+
+// ============================================================
+// KEYWORD DETECTION
+// ============================================================
+
+cancion is_kw_cancion(): entero {
+    si (tok_len != 7) { retorno 0; }
+    si (tok_buf[0] != 99) { retorno 0; }
+    si (tok_buf[1] != 97) { retorno 0; }
+    si (tok_buf[2] != 110) { retorno 0; }
+    si (tok_buf[3] != 99) { retorno 0; }
+    si (tok_buf[4] != 105) { retorno 0; }
+    si (tok_buf[5] != 111) { retorno 0; }
+    si (tok_buf[6] != 110) { retorno 0; }
+    retorno 1;
+}
+
+cancion is_kw_retorno(): entero {
+    si (tok_len != 7) { retorno 0; }
+    si (tok_buf[0] != 114) { retorno 0; }
+    si (tok_buf[1] != 101) { retorno 0; }
+    si (tok_buf[2] != 116) { retorno 0; }
+    si (tok_buf[3] != 111) { retorno 0; }
+    si (tok_buf[4] != 114) { retorno 0; }
+    si (tok_buf[5] != 110) { retorno 0; }
+    si (tok_buf[6] != 111) { retorno 0; }
+    retorno 1;
+}
+
+cancion is_kw_salir_sys(): entero {
+    si (tok_len != 9) { retorno 0; }
+    si (tok_buf[0] != 115) { retorno 0; }  // s
+    si (tok_buf[1] != 97) { retorno 0; }   // a
+    si (tok_buf[2] != 108) { retorno 0; }  // l
+    si (tok_buf[3] != 105) { retorno 0; }  // i
+    si (tok_buf[4] != 114) { retorno 0; }  // r
+    si (tok_buf[5] != 95) { retorno 0; }   // _
+    si (tok_buf[6] != 115) { retorno 0; }  // s
+    si (tok_buf[7] != 121) { retorno 0; }  // y
+    si (tok_buf[8] != 115) { retorno 0; }  // s
+    retorno 1;
+}
+
+cancion is_kw_escribir_sys(): entero {
+    si (tok_len != 12) { retorno 0; }
+    si (tok_buf[0] != 101) { retorno 0; }  // e
+    si (tok_buf[1] != 115) { retorno 0; }  // s
+    si (tok_buf[2] != 99) { retorno 0; }   // c
+    si (tok_buf[3] != 114) { retorno 0; }  // r
+    si (tok_buf[4] != 105) { retorno 0; }  // i
+    si (tok_buf[5] != 98) { retorno 0; }   // b
+    si (tok_buf[6] != 105) { retorno 0; }  // i
+    si (tok_buf[7] != 114) { retorno 0; }  // r
+    si (tok_buf[8] != 95) { retorno 0; }   // _
+    si (tok_buf[9] != 115) { retorno 0; }  // s
+    si (tok_buf[10] != 121) { retorno 0; } // y
+    si (tok_buf[11] != 115) { retorno 0; } // s
+    retorno 1;
+}
+
+// ============================================================
+// CODE GENERATOR
+// ============================================================
+
+decreto code: [32768]octeto;
+decreto code_pos: entero = 0;
+decreto data: [8192]octeto;
+decreto data_pos: entero = 0;
+
+cancion emit_byte(b: entero) {
+    code[code_pos] = b;
+    code_pos = code_pos + 1;
+}
+
+cancion emit_dword(d: entero) {
+    code[code_pos] = d;
+    code[code_pos + 1] = d / 256;
+    code[code_pos + 2] = d / 65536;
+    code[code_pos + 3] = d / 16777216;
+    code_pos = code_pos + 4;
+}
+
+cancion emit_qword(q: entero) {
+    emit_dword(q);
+    emit_dword(0);
+}
+
+// push rbp
+cancion emit_push_rbp() { emit_byte(85); }
+
+// mov rbp, rsp
+cancion emit_mov_rbp_rsp() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(229);
+}
+
+// leave
+cancion emit_leave() { emit_byte(201); }
+
+// ret
+cancion emit_ret() { emit_byte(195); }
+
+// mov rax, imm32
+cancion emit_mov_rax_imm32(val: entero) {
+    emit_byte(72);
+    emit_byte(199);
+    emit_byte(192);
+    emit_dword(val);
+}
+
+// mov rdi, rax
+cancion emit_mov_rdi_rax() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(199);
+}
+
+// mov rsi, rax
+cancion emit_mov_rsi_rax() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(198);
+}
+
+// mov rdx, rax
+cancion emit_mov_rdx_rax() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(194);
+}
+
+// xor rax, rax
+cancion emit_xor_rax_rax() {
+    emit_byte(72);
+    emit_byte(49);
+    emit_byte(192);
+}
+
+// syscall
+cancion emit_syscall() {
+    emit_byte(15);
+    emit_byte(5);
+}
+
+// lea rax, [rip+disp32]
+cancion emit_lea_rax_rip_rel(disp: entero) {
+    emit_byte(72);
+    emit_byte(141);
+    emit_byte(5);
+    emit_dword(disp);
+}
+
+// ============================================================
+// STRING DATA
+// ============================================================
+
+decreto str_data: [4096]octeto;
+decreto str_data_pos: entero = 0;
+
+cancion add_string(s: entero, len: entero): entero {
+    decreto start: entero = str_data_pos;
+    decreto i: entero = 0;
+    mientras (i < len) {
+        str_data[str_data_pos] = src[s + i];
+        str_data_pos = str_data_pos + 1;
+        i = i + 1;
+    }
+    retorno start;
+}
+
+// ============================================================
+// SIMPLE PARSER + CODE GENERATOR
+// ============================================================
+
+cancion compile_expr(): entero {
+    si (tok_type == 2) {
+        decreto val: entero = tok_int_val;
+        siguiente_token();
+        retorno val;
+    }
+    retorno 0;
+}
+
+cancion compile_syscall_exit() {
+    // salir_sys(code)
+    siguiente_token();  // skip salir_sys
+    si (tok_type == 4) { siguiente_token(); }  // skip (
+    decreto exit_code: entero = compile_expr();
+    si (tok_type == 5) { siguiente_token(); }  // skip )
+    si (tok_type == 8) { siguiente_token(); }  // skip ;
+
+    emit_mov_rax_imm32(exit_code);
+    emit_mov_rdi_rax();
+    emit_mov_rax_imm32(60);
+    emit_syscall();
+}
+
+cancion compile_syscall_write() {
+    // escribir_sys(fd, str, len)
+    siguiente_token();  // skip escribir_sys
+    si (tok_type == 4) { siguiente_token(); }  // skip (
+
+    // fd
+    decreto fd: entero = compile_expr();
+    si (tok_type == 10) { siguiente_token(); }  // skip ,
+
+    // Skip string for now (assume quoted literal)
+    // For simplicity, just use pre-loaded data
+    si (tok_type == 10) { siguiente_token(); }  // skip string & ,
+
+    // len
+    decreto len: entero = compile_expr();
+    si (tok_type == 5) { siguiente_token(); }  // skip )
+    si (tok_type == 8) { siguiente_token(); }  // skip ;
+
+    // Generate write syscall
+    emit_mov_rax_imm32(fd);
+    emit_mov_rdi_rax();
+    // lea rsi, [data]
+    decreto cur: entero = code_pos;
+    decreto rip_rel: entero = 65536 - cur - 7;
+    emit_lea_rax_rip_rel(rip_rel);
+    emit_mov_rsi_rax();
+    emit_mov_rax_imm32(len);
+    emit_mov_rdx_rax();
+    emit_mov_rax_imm32(1);
+    emit_syscall();
+}
+
+cancion compile_statement() {
+    si (tok_type == 1) {
+        si (is_kw_salir_sys() == 1) {
+            compile_syscall_exit();
+            retorno;
+        }
+        si (is_kw_escribir_sys() == 1) {
+            compile_syscall_write();
+            retorno;
+        }
+        si (is_kw_retorno() == 1) {
+            siguiente_token();  // skip retorno
+            decreto val: entero = compile_expr();
+            si (tok_type == 8) { siguiente_token(); }  // skip ;
+            emit_mov_rax_imm32(val);
+            emit_leave();
+            emit_ret();
+            retorno;
+        }
+    }
+    // Skip unknown
+    siguiente_token();
+}
+
+cancion compile_function() {
+    // cancion name() { ... }
+    siguiente_token();  // skip cancion
+    siguiente_token();  // skip name
+    si (tok_type == 4) { siguiente_token(); }  // skip (
+    si (tok_type == 5) { siguiente_token(); }  // skip )
+    si (tok_type == 6) { siguiente_token(); }  // skip {
+
+    emit_push_rbp();
+    emit_mov_rbp_rsp();
+
+    mientras (tok_type != 7) {
+        compile_statement();
+        si (tok_type == 0) { retorno; }
+    }
+    siguiente_token();  // skip }
+
+    emit_leave();
+    emit_ret();
+}
+
+cancion compile_program() {
+    siguiente_token();
+    mientras (tok_type != 0) {
+        si (tok_type == 1) {
+            si (is_kw_cancion() == 1) {
+                compile_function();
+            } sino {
+                siguiente_token();
+            }
+        } sino {
+            siguiente_token();
+        }
+    }
+}
+
+// ============================================================
+// ELF GENERATION
+// ============================================================
+
+decreto elf_buf: [131072]octeto;
+decreto elf_pos: entero = 0;
+
+cancion elf_byte(b: entero) {
+    elf_buf[elf_pos] = b;
+    elf_pos = elf_pos + 1;
+}
+
+cancion elf_word(w: entero) {
+    elf_buf[elf_pos] = w;
+    elf_buf[elf_pos + 1] = w / 256;
+    elf_pos = elf_pos + 2;
+}
+
+cancion elf_dword(d: entero) {
+    elf_buf[elf_pos] = d;
+    elf_buf[elf_pos + 1] = d / 256;
+    elf_buf[elf_pos + 2] = d / 65536;
+    elf_buf[elf_pos + 3] = d / 16777216;
+    elf_pos = elf_pos + 4;
+}
+
+cancion elf_qword(q: entero) {
+    elf_dword(q);
+    elf_dword(0);
+}
+
+cancion gen_elf_header() {
+    elf_byte(127); elf_byte(69); elf_byte(76); elf_byte(70);
+    elf_byte(2); elf_byte(1); elf_byte(1); elf_byte(0);
+    elf_byte(0); elf_byte(0); elf_byte(0); elf_byte(0);
+    elf_byte(0); elf_byte(0); elf_byte(0); elf_byte(0);
+    elf_word(2); elf_word(62); elf_dword(1);
+    elf_qword(4198400);
+    elf_qword(64);
+    elf_qword(0);
+    elf_dword(0);
+    elf_word(64); elf_word(56); elf_word(2);
+    elf_word(0); elf_word(0); elf_word(0);
+}
+
+cancion gen_program_headers() {
+    elf_dword(1); elf_dword(5);
+    elf_qword(4096);
+    elf_qword(4198400); elf_qword(4198400);
+    elf_qword(code_pos); elf_qword(code_pos);
+    elf_qword(4096);
+
+    elf_dword(1); elf_dword(6);
+    elf_qword(69632);
+    elf_qword(4263936); elf_qword(4263936);
+    elf_qword(data_pos); elf_qword(data_pos);
+    elf_qword(4096);
+}
+
+cancion gen_elf() {
+    gen_elf_header();
+    gen_program_headers();
+
+    mientras (elf_pos < 4096) { elf_byte(0); }
+
+    decreto i: entero = 0;
+    mientras (i < code_pos) {
+        elf_byte(code[i]);
+        i = i + 1;
+    }
+
+    mientras (elf_pos < 69632) { elf_byte(0); }
+
+    i = 0;
+    mientras (i < data_pos) {
+        elf_byte(data[i]);
+        i = i + 1;
+    }
+}
+
+// ============================================================
+// MAIN
+// ============================================================
+
+cancion principal() {
+    escribir_sys(2, "Viva Bootstrap Compiler\n", 24);
+
+    // Test source: cancion principal() { salir_sys(42); }
+    src[0] = 99;   // c
+    src[1] = 97;   // a
+    src[2] = 110;  // n
+    src[3] = 99;   // c
+    src[4] = 105;  // i
+    src[5] = 111;  // o
+    src[6] = 110;  // n
+    src[7] = 32;   // space
+    src[8] = 112;  // p
+    src[9] = 114;  // r
+    src[10] = 105; // i
+    src[11] = 110; // n
+    src[12] = 99;  // c
+    src[13] = 105; // i
+    src[14] = 112; // p
+    src[15] = 97;  // a
+    src[16] = 108; // l
+    src[17] = 40;  // (
+    src[18] = 41;  // )
+    src[19] = 32;  // space
+    src[20] = 123; // {
+    src[21] = 32;  // space
+    // salir_sys(42);
+    src[22] = 115; // s
+    src[23] = 97;  // a
+    src[24] = 108; // l
+    src[25] = 105; // i
+    src[26] = 114; // r
+    src[27] = 95;  // _
+    src[28] = 115; // s
+    src[29] = 121; // y
+    src[30] = 115; // s
+    src[31] = 40;  // (
+    src[32] = 52;  // 4
+    src[33] = 50;  // 2
+    src[34] = 41;  // )
+    src[35] = 59;  // ;
+    src[36] = 32;  // space
+    src[37] = 125; // }
+    src_len = 38;
+
+    escribir_sys(2, "Compiling...\n", 13);
+
+    compile_program();
+
+    escribir_sys(2, "Generating ELF...\n", 18);
+
+    gen_elf();
+
+    escribir_sys(2, "Writing output...\n", 18);
+
+    escribir_sys(1, elf_buf, elf_pos);
+
+    salir_sys(0);
+}
