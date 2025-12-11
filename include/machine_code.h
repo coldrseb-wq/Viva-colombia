@@ -310,6 +310,10 @@ int encode_lea_rbx_rbp_off(MachineCode* mc, int32_t off);    // lea rbx, [rbp+of
 int encode_lea_rdi_rbp_off(MachineCode* mc, int32_t off);    // lea rdi, [rbp+off]
 int encode_lea_rsi_rbp_off(MachineCode* mc, int32_t off);    // lea rsi, [rbp+off]
 
+// RIP-relative MOV (for global variables)
+int encode_mov_rax_rip_rel(MachineCode* mc, int32_t off);       // mov rax, [rip+off]
+int encode_mov_rip_rel_from_rax(MachineCode* mc, int32_t off);  // mov [rip+off], rax
+
 // === RELOCATIONS ===
 int add_relocation_entry(MachineCode* mc, uint32_t sym, uint32_t type, int64_t add);
 

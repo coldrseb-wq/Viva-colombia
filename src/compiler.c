@@ -15,6 +15,7 @@
 #define MAX_BUF 65536
 #define MAX_FUNCS 64
 #define MAX_PARAMS 6
+#define MAX_GLOBALS 64
 
 typedef enum { OUT_C, OUT_ASM, OUT_ELF, OUT_STANDALONE } OutMode;
 
@@ -41,6 +42,14 @@ typedef struct {
 } Func;
 
 typedef struct {
+    char name[64];
+    int data_offset;    // Offset in data section
+    VivaType type;
+    int size;
+    int64_t init_value; // Initial value (for constant initializers)
+} GlobalVar;
+
+typedef struct {
     FILE* f;
     OutMode mode;
     PlatformTarget plat;
@@ -59,6 +68,9 @@ typedef struct {
     int stack_off;
     int data_size;
     int use_syscalls;   // 1 = raw syscalls, 0 = libc
+    GlobalVar globals[MAX_GLOBALS];
+    int nglobal;
+    int in_function;    // 1 = inside function, 0 = global scope
 } Compiler;
 
 // Forward declarations
@@ -114,6 +126,40 @@ static int is_var_str(Compiler* c, const char* name) {
 static VivaType get_var_type(Compiler* c, const char* name) {
     int i = find_var(c, name);
     return (i >= 0) ? c->vars[i].type : VIVA_TYPE_ENTERO;
+}
+
+// === GLOBAL VARIABLE MANAGEMENT ===
+static int find_global(Compiler* c, const char* name) {
+    for (int i = 0; i < c->nglobal; i++)
+        if (strcmp(c->globals[i].name, name) == 0) return i;
+    return -1;
+}
+
+static int add_global(Compiler* c, const char* name, VivaType type, int size, int64_t init_val) {
+    if (c->nglobal >= MAX_GLOBALS) return -1;
+    strncpy(c->globals[c->nglobal].name, name, 63);
+    c->globals[c->nglobal].type = type;
+    c->globals[c->nglobal].size = size;
+    c->globals[c->nglobal].data_offset = c->data_size;
+    c->globals[c->nglobal].init_value = init_val;
+    c->data_size += size;
+    // Align to 8 bytes for next variable
+    if (c->data_size % 8 != 0) c->data_size += 8 - (c->data_size % 8);
+    return c->nglobal++;
+}
+
+static int get_global_offset(Compiler* c, const char* name) {
+    int i = find_global(c, name);
+    return (i >= 0) ? c->globals[i].data_offset : -1;
+}
+
+static VivaType get_global_type(Compiler* c, const char* name) {
+    int i = find_global(c, name);
+    return (i >= 0) ? c->globals[i].type : VIVA_TYPE_ENTERO;
+}
+
+static int is_global_var(Compiler* c, const char* name) {
+    return find_global(c, name) >= 0;
 }
 
 // === FUNCTION MANAGEMENT ===
@@ -191,17 +237,30 @@ static Compiler* init_compiler_internal(const char* outfile, OutMode mode, int u
 }
 
 static void write_elf_data_section(Compiler* c) {
-    if ((c->mode != OUT_ELF && c->mode != OUT_STANDALONE) || c->nstr == 0) return;
+    // Write data section if there are strings OR global variables
+    if ((c->mode != OUT_ELF && c->mode != OUT_STANDALONE) ||
+        (c->nstr == 0 && c->nglobal == 0)) return;
 
-    uint8_t* data = calloc(1, c->data_size + 1);
+    uint8_t* data = calloc(1, c->data_size + 1);  // calloc zeros = globals init to 0
     if (!data) return;
 
-    int off = 0;
+    // Write strings at their stored offsets
     for (int i = 0; i < c->nstr; i++) {
+        int soff = c->strs[i].offset;
         size_t len = strlen(c->strs[i].val);
-        memcpy(data + off, c->strs[i].val, len);
-        data[off + len] = 0;
-        off += len + 1;
+        memcpy(data + soff, c->strs[i].val, len);
+        data[soff + len] = 0;
+    }
+
+    // Write global variable initial values at their stored offsets
+    for (int i = 0; i < c->nglobal; i++) {
+        int goff = c->globals[i].data_offset;
+        int64_t val = c->globals[i].init_value;
+        int sz = c->globals[i].size;
+        // Write value in little-endian
+        for (int b = 0; b < sz && b < 8; b++) {
+            data[goff + b] = (val >> (b * 8)) & 0xFF;
+        }
     }
 
     if (c->mode == OUT_STANDALONE) {
@@ -239,7 +298,7 @@ static void finish_compiler(Compiler* c) {
             fclose(c->f);
             c->f = NULL;
             write_complete_elf_file(c->elf, c->outname);
-        } else if (c->mode == OUT_STANDALONE && c->nstr == 0) {
+        } else if (c->mode == OUT_STANDALONE && c->nstr == 0 && c->nglobal == 0) {
             // Write standalone ELF executable without libc (no data section)
             if (c->f) { fclose(c->f); c->f = NULL; }
             write_standalone_elf(c->elf, c->mc, NULL, 0, c->outname);
@@ -320,6 +379,24 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                 }
             } else {
                 if (c->mode == OUT_C) emit(c, "%s", n->value);
+                else if (c->mc && is_global_var(c, n->value)) {
+                    // Global variable: use RIP-relative addressing
+                    int goff = get_global_offset(c, n->value);
+                    VivaType type = get_global_type(c, n->value);
+                    int cur_pos = c->mc->size;
+                    // Global vars are after strings in data section
+                    // strings_size is tracked by data_size before globals are added
+                    int base_off = 0x1000 + goff;
+                    if (type == VIVA_TYPE_ARREGLO) {
+                        // LEA rax, [rip + offset]
+                        int rip_rel = base_off - cur_pos - 7;
+                        encode_lea_rax_rip_rel(c->mc, rip_rel);
+                    } else {
+                        // MOV rax, [rip + offset]
+                        int rip_rel = base_off - cur_pos - 7;
+                        encode_mov_rax_rip_rel(c->mc, rip_rel);
+                    }
+                }
                 else if (c->mode == OUT_ASM) {
                     int off = get_var_off(c, n->value);
                     VivaType type = get_var_type(c, n->value);
@@ -801,6 +878,17 @@ static void compile_var(Compiler* c, ASTNode* n) {
         }
     }
 
+    // Global variable: register in data section, no code emission
+    if (!c->in_function && c->mc) {
+        // Extract constant initializer if present
+        int64_t init_val = 0;
+        if (n->left && n->left->type == NUMBER_NODE && n->left->value) {
+            init_val = atoll(n->left->value);
+        }
+        add_global(c, n->value, type, size, init_val);
+        return;
+    }
+
     if (c->mode == OUT_C) {
         ind(c);
         if (n->left && (n->left->type == STRING_LITERAL_NODE ||
@@ -916,6 +1004,15 @@ static void compile_assign(Compiler* c, ASTNode* n) {
         emit(c, "%s = ", n->value);
         compile_expr(c, n->left);
         emit(c, ";\n");
+    }
+    else if (c->mc && is_global_var(c, n->value)) {
+        // Global variable assignment: use RIP-relative addressing
+        compile_expr(c, n->left);  // value in rax
+        int goff = get_global_offset(c, n->value);
+        int cur_pos = c->mc->size;
+        int base_off = 0x1000 + goff;
+        int rip_rel = base_off - cur_pos - 7;
+        encode_mov_rip_rel_from_rax(c->mc, rip_rel);
     }
     else {
         int off = get_var_off(c, n->value);
@@ -1080,13 +1177,15 @@ static void compile_return(Compiler* c, ASTNode* n) {
 static void compile_func(Compiler* c, ASTNode* n) {
     const char* name = n->value ? n->value : "func";
 
-    // Save old vars
+    // Save old vars and mark as inside function
     Var old_vars[MAX_VARS];
     int old_nvar = c->nvar;
     int old_stack = c->stack_off;
+    int old_in_func = c->in_function;
     memcpy(old_vars, c->vars, sizeof(old_vars));
     c->nvar = 0;
     c->stack_off = 0;
+    c->in_function = 1;
 
     // Register function
     int func_offset = c->mc ? get_current_offset(c->mc) : 0;
@@ -1167,10 +1266,11 @@ static void compile_func(Compiler* c, ASTNode* n) {
         encode_ret(c->mc);
     }
 
-    // Restore old vars
+    // Restore old vars and in_function flag
     memcpy(c->vars, old_vars, sizeof(old_vars));
     c->nvar = old_nvar;
     c->stack_off = old_stack;
+    c->in_function = old_in_func;
 }
 
 // === NODE DISPATCHER ===
@@ -1210,6 +1310,15 @@ static void compile_node(Compiler* c, ASTNode* n) {
 static void compile_standalone(Compiler* c, ASTNode* ast) {
     if (!c->mc) return;
 
+    // First pass: register all global variables (before generating any code)
+    ASTNode* stmt = ast->left;
+    while (stmt) {
+        if (stmt->type == VAR_DECL_NODE || stmt->type == VAR_DECL_SPANISH_NODE) {
+            compile_var(c, stmt);  // This will call add_global since in_function=0
+        }
+        stmt = stmt->right;
+    }
+
     // Generate _start that calls main and exits
     // _start:
     //   call main
@@ -1225,7 +1334,7 @@ static void compile_standalone(Compiler* c, ASTNode* ast) {
 
     // Find and compile main function first
     int main_offset = -1;
-    ASTNode* stmt = ast->left;
+    stmt = ast->left;
     while (stmt) {
         if ((stmt->type == FN_DECL_NODE || stmt->type == FN_DECL_SPANISH_NODE) &&
             stmt->value && (strcmp(stmt->value, "main") == 0 || strcmp(stmt->value, "principal") == 0)) {

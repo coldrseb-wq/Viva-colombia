@@ -409,6 +409,16 @@ int encode_lea_rbx_rbp_off(MachineCode* mc, int32_t off) {
 int encode_lea_rdi_rbp_off(MachineCode* mc, int32_t off) {
     uint8_t c[7] = {0x48, 0x8D, 0xBD}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
 }
+
+// MOV with RIP-relative addressing (for global variables)
+int encode_mov_rax_rip_rel(MachineCode* mc, int32_t off) {
+    // MOV rax, [rip + off]
+    uint8_t c[7] = {0x48, 0x8B, 0x05}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
+}
+int encode_mov_rip_rel_from_rax(MachineCode* mc, int32_t off) {
+    // MOV [rip + off], rax
+    uint8_t c[7] = {0x48, 0x89, 0x05}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
+}
 int encode_lea_rsi_rbp_off(MachineCode* mc, int32_t off) {
     uint8_t c[7] = {0x48, 0x8D, 0xB5}; memcpy(c + 3, &off, 4); return append_bytes(mc, c, 7);
 }
