@@ -522,48 +522,15 @@ cancion gen_elf() {
 
 cancion principal() {
     escribir_sys(2, "Viva Bootstrap Compiler\n", 24);
+    escribir_sys(2, "Reading source from stdin...\n", 29);
 
-    // Test source: cancion principal() { salir_sys(42); }
-    src[0] = 99;   // c
-    src[1] = 97;   // a
-    src[2] = 110;  // n
-    src[3] = 99;   // c
-    src[4] = 105;  // i
-    src[5] = 111;  // o
-    src[6] = 110;  // n
-    src[7] = 32;   // space
-    src[8] = 112;  // p
-    src[9] = 114;  // r
-    src[10] = 105; // i
-    src[11] = 110; // n
-    src[12] = 99;  // c
-    src[13] = 105; // i
-    src[14] = 112; // p
-    src[15] = 97;  // a
-    src[16] = 108; // l
-    src[17] = 40;  // (
-    src[18] = 41;  // )
-    src[19] = 32;  // space
-    src[20] = 123; // {
-    src[21] = 32;  // space
-    // salir_sys(42);
-    src[22] = 115; // s
-    src[23] = 97;  // a
-    src[24] = 108; // l
-    src[25] = 105; // i
-    src[26] = 114; // r
-    src[27] = 95;  // _
-    src[28] = 115; // s
-    src[29] = 121; // y
-    src[30] = 115; // s
-    src[31] = 40;  // (
-    src[32] = 52;  // 4
-    src[33] = 50;  // 2
-    src[34] = 41;  // )
-    src[35] = 59;  // ;
-    src[36] = 32;  // space
-    src[37] = 125; // }
-    src_len = 38;
+    // Read source from stdin
+    src_len = leer_sys(0, src, 8192);
+
+    si (src_len < 1) {
+        escribir_sys(2, "Error: no input\n", 16);
+        salir_sys(1);
+    }
 
     escribir_sys(2, "Compiling...\n", 13);
 
