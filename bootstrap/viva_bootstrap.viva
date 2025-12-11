@@ -206,6 +206,89 @@ cancion is_kw_escribir_sys(): entero {
     retorno 1;
 }
 
+cancion is_kw_decreto(): entero {
+    si (tok_len != 7) { retorno 0; }
+    si (tok_buf[0] != 100) { retorno 0; }
+    si (tok_buf[1] != 101) { retorno 0; }
+    si (tok_buf[2] != 99) { retorno 0; }
+    si (tok_buf[3] != 114) { retorno 0; }
+    si (tok_buf[4] != 101) { retorno 0; }
+    si (tok_buf[5] != 116) { retorno 0; }
+    si (tok_buf[6] != 111) { retorno 0; }
+    retorno 1;
+}
+
+cancion is_kw_si(): entero {
+    si (tok_len != 2) { retorno 0; }
+    si (tok_buf[0] != 115) { retorno 0; }
+    si (tok_buf[1] != 105) { retorno 0; }
+    retorno 1;
+}
+
+cancion is_kw_mientras(): entero {
+    si (tok_len != 8) { retorno 0; }
+    si (tok_buf[0] != 109) { retorno 0; }
+    si (tok_buf[1] != 105) { retorno 0; }
+    si (tok_buf[2] != 101) { retorno 0; }
+    si (tok_buf[3] != 110) { retorno 0; }
+    si (tok_buf[4] != 116) { retorno 0; }
+    si (tok_buf[5] != 114) { retorno 0; }
+    si (tok_buf[6] != 97) { retorno 0; }
+    si (tok_buf[7] != 115) { retorno 0; }
+    retorno 1;
+}
+
+// Symbol table for local variables
+decreto sym_names: [512]octeto;
+decreto sym_offs: [32]entero;
+decreto sym_cnt: entero = 0;
+decreto sym_np: entero = 0;
+decreto sym_sp: entero = 0;
+
+cancion sym_reset() {
+    sym_cnt = 0;
+    sym_np = 0;
+    sym_sp = 0;
+}
+
+cancion sym_add(): entero {
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        sym_names[sym_np] = tok_buf[i];
+        sym_np = sym_np + 1;
+        i = i + 1;
+    }
+    sym_names[sym_np] = 0;
+    sym_np = sym_np + 1;
+    sym_sp = sym_sp - 8;
+    sym_offs[sym_cnt] = sym_sp;
+    sym_cnt = sym_cnt + 1;
+    retorno sym_sp;
+}
+
+cancion sym_find(): entero {
+    decreto i: entero = 0;
+    decreto p: entero = 0;
+    mientras (i < sym_cnt) {
+        decreto j: entero = 0;
+        decreto ok: entero = 1;
+        mientras (sym_names[p + j] != 0) {
+            si (j >= tok_len) { ok = 0; }
+            si (ok == 1) {
+                si (tok_buf[j] != sym_names[p + j]) { ok = 0; }
+            }
+            j = j + 1;
+        }
+        si (ok == 1) {
+            si (j == tok_len) { retorno sym_offs[i]; }
+        }
+        mientras (sym_names[p] != 0) { p = p + 1; }
+        p = p + 1;
+        i = i + 1;
+    }
+    retorno 0;
+}
+
 // ============================================================
 // CODE GENERATOR
 // ============================================================
@@ -297,6 +380,152 @@ cancion emit_lea_rax_rip_rel(disp: entero) {
     emit_byte(141);
     emit_byte(5);
     emit_dword(disp);
+}
+
+// sub rsp, imm32
+cancion emit_sub_rsp(v: entero) {
+    emit_byte(72);
+    emit_byte(129);
+    emit_byte(236);
+    emit_dword(v);
+}
+
+// add rsp, imm32
+cancion emit_add_rsp(v: entero) {
+    emit_byte(72);
+    emit_byte(129);
+    emit_byte(196);
+    emit_dword(v);
+}
+
+// mov rax, [rbp+off]
+cancion emit_load(off: entero) {
+    emit_byte(72);
+    emit_byte(139);
+    emit_byte(133);
+    emit_dword(off);
+}
+
+// mov [rbp+off], rax
+cancion emit_store(off: entero) {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(133);
+    emit_dword(off);
+}
+
+// push rax
+cancion emit_push() { emit_byte(80); }
+
+// pop rax
+cancion emit_pop() { emit_byte(88); }
+
+// pop rcx
+cancion emit_pop_rcx() { emit_byte(89); }
+
+// mov rcx, rax
+cancion emit_mov_rcx() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(193);
+}
+
+// add rax, rcx
+cancion emit_add() {
+    emit_byte(72);
+    emit_byte(1);
+    emit_byte(200);
+}
+
+// sub rax, rcx
+cancion emit_sub() {
+    emit_byte(72);
+    emit_byte(41);
+    emit_byte(200);
+}
+
+// imul rax, rcx
+cancion emit_mul() {
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(175);
+    emit_byte(193);
+}
+
+// cqo; idiv rcx
+cancion emit_div() {
+    emit_byte(72);
+    emit_byte(153);
+    emit_byte(72);
+    emit_byte(247);
+    emit_byte(249);
+}
+
+// cmp rcx, rax
+cancion emit_cmp() {
+    emit_byte(72);
+    emit_byte(57);
+    emit_byte(193);
+}
+
+// sete al; movzx rax, al
+cancion emit_sete() {
+    emit_byte(15);
+    emit_byte(148);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// setne al; movzx rax, al
+cancion emit_setne() {
+    emit_byte(15);
+    emit_byte(149);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// setl al; movzx rax, al
+cancion emit_setl() {
+    emit_byte(15);
+    emit_byte(156);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// setg al; movzx rax, al
+cancion emit_setg() {
+    emit_byte(15);
+    emit_byte(159);
+    emit_byte(192);
+    emit_byte(72);
+    emit_byte(15);
+    emit_byte(182);
+    emit_byte(192);
+}
+
+// test rax, rax
+cancion emit_testrax() {
+    emit_byte(72);
+    emit_byte(133);
+    emit_byte(192);
+}
+
+// je rel32 (returns patch addr)
+cancion emit_je(): entero {
+    emit_byte(15);
+    emit_byte(132);
+    decreto addr: entero = code_pos;
+    emit_dword(0);
+    retorno addr;
 }
 
 // ============================================================
