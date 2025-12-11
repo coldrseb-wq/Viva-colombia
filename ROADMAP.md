@@ -9,7 +9,17 @@ Viva is designed to be:
 - **Readable like Go** - Clean, simple Spanish-based syntax that's easy to understand
 
 ## Project Overview
-Viva Colombia is a Spanish-based programming language focused on Colombian culture and heroes, transitioning from C-code generation to direct machine code generation. The ultimate goal is to achieve bootstrapping - creating a Viva compiler written entirely in Viva that generates direct machine code for Windows, macOS, and Linux.
+Viva Colombia is a Spanish-based programming language focused on Colombian culture and heroes, transitioning from C-code generation to direct machine code generation. The ultimate goal is to achieve bootstrapping - creating a Viva compiler written entirely in Viva that generates direct machine code for Windows, macOS, Linux, and FreeBSD.
+
+## Target Platforms
+| Platform | Format | Status |
+|----------|--------|--------|
+| Linux | ELF | ✅ Complete |
+| macOS | Mach-O | ✅ Complete |
+| Windows | PE/COFF | ✅ Complete |
+| FreeBSD | ELF | 🔜 Planned |
+
+FreeBSD uses ELF format like Linux but with different syscall numbers (read=3, write=4, exit=1).
 
 ## Phase 1: Foundation & C-Code Generation (COMPLETED)
 ### Objectives:
@@ -108,6 +118,7 @@ Viva Colombia is a Spanish-based programming language focused on Colombian cultu
 - ✅ Assignment operation fixes for all output modes
 
 ### Current Tasks:
+- [ ] FreeBSD platform support (ELF with FreeBSD syscalls)
 - [ ] Advanced machine code optimization passes
 - [ ] Memory management in machine code
 - [ ] Function definition support in machine code
@@ -196,7 +207,8 @@ The progression toward a fully bootstrapped Viva compiler:
 
 ## Next Critical Steps
 1. **Fix self-hosting** - Resolve the empty code section in bootstrap_v2
-2. Complete advanced machine code optimization passes
-3. Enhance PE/COFF format with full COFF section structure
-4. Develop comprehensive runtime system with memory management
-5. Add complete expression evaluation and control flow in machine code
+2. **Add FreeBSD support** - ELF with FreeBSD syscall numbers
+3. Complete advanced machine code optimization passes
+4. Enhance PE/COFF format with full COFF section structure
+5. Develop comprehensive runtime system with memory management
+6. Add complete expression evaluation and control flow in machine code
