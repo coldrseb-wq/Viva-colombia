@@ -1,0 +1,601 @@
+// Viva Compiler - Code Generator (Bootstrap)
+// Generates x86-64 machine code from AST
+
+// === MACHINE CODE BUFFER ===
+decreto code: [32768]octeto;   // 32KB code buffer
+decreto code_pos: entero = 0;
+
+decreto data: [8192]octeto;    // 8KB data buffer
+decreto data_pos: entero = 0;
+
+// === EMIT HELPERS ===
+cancion emit_byte(b: entero) {
+    code[code_pos] = b;
+    code_pos = code_pos + 1;
+}
+
+cancion emit_word(w: entero) {
+    code[code_pos] = w;
+    code[code_pos + 1] = w / 256;
+    code_pos = code_pos + 2;
+}
+
+cancion emit_dword(d: entero) {
+    code[code_pos] = d;
+    code[code_pos + 1] = d / 256;
+    code[code_pos + 2] = d / 65536;
+    code[code_pos + 3] = d / 16777216;
+    code_pos = code_pos + 4;
+}
+
+cancion emit_qword(q: entero) {
+    emit_dword(q);
+    emit_dword(0);  // Upper 32 bits = 0 for small values
+}
+
+// === x86-64 INSTRUCTION ENCODING ===
+
+// push rbp
+cancion emit_push_rbp() {
+    emit_byte(85);  // 0x55
+}
+
+// mov rbp, rsp
+cancion emit_mov_rbp_rsp() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(137);  // 0x89 MOV
+    emit_byte(229);  // 0xE5 rbp, rsp
+}
+
+// leave (mov rsp, rbp; pop rbp)
+cancion emit_leave() {
+    emit_byte(201);  // 0xC9
+}
+
+// ret
+cancion emit_ret() {
+    emit_byte(195);  // 0xC3
+}
+
+// push rax
+cancion emit_push_rax() {
+    emit_byte(80);  // 0x50
+}
+
+// pop rax
+cancion emit_pop_rax() {
+    emit_byte(88);  // 0x58
+}
+
+// pop rbx
+cancion emit_pop_rbx() {
+    emit_byte(91);  // 0x5B
+}
+
+// pop rdi
+cancion emit_pop_rdi() {
+    emit_byte(95);  // 0x5F
+}
+
+// pop rsi
+cancion emit_pop_rsi() {
+    emit_byte(94);  // 0x5E
+}
+
+// pop rdx
+cancion emit_pop_rdx() {
+    emit_byte(90);  // 0x5A
+}
+
+// mov rax, imm64
+cancion emit_mov_rax_imm(val: entero) {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(184);  // 0xB8 MOV rax, imm64
+    emit_qword(val);
+}
+
+// mov rax, imm32 (sign-extended)
+cancion emit_mov_rax_imm32(val: entero) {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(199);  // 0xC7
+    emit_byte(192);  // 0xC0 /0 rax
+    emit_dword(val);
+}
+
+// mov rdi, rax
+cancion emit_mov_rdi_rax() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(137);  // 0x89 MOV
+    emit_byte(199);  // 0xC7 rdi, rax
+}
+
+// mov rsi, rax
+cancion emit_mov_rsi_rax() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(137);  // 0x89 MOV
+    emit_byte(198);  // 0xC6 rsi, rax
+}
+
+// mov rdx, rax
+cancion emit_mov_rdx_rax() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(137);  // 0x89 MOV
+    emit_byte(194);  // 0xC2 rdx, rax
+}
+
+// mov rbx, rax
+cancion emit_mov_rbx_rax() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(137);  // 0x89 MOV
+    emit_byte(195);  // 0xC3 rbx, rax
+}
+
+// add rax, rbx
+cancion emit_add_rax_rbx() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(1);    // 0x01 ADD
+    emit_byte(216);  // 0xD8 rax, rbx
+}
+
+// sub rax, rbx
+cancion emit_sub_rax_rbx() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(41);   // 0x29 SUB
+    emit_byte(216);  // 0xD8 rax, rbx
+}
+
+// imul rax, rbx
+cancion emit_mul_rax_rbx() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(15);   // 0x0F
+    emit_byte(175);  // 0xAF IMUL
+    emit_byte(195);  // 0xC3 rax, rbx
+}
+
+// cmp rax, rbx
+cancion emit_cmp_rax_rbx() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(57);   // 0x39 CMP
+    emit_byte(216);  // 0xD8 rax, rbx
+}
+
+// xor rax, rax
+cancion emit_xor_rax_rax() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(49);   // 0x31 XOR
+    emit_byte(192);  // 0xC0 rax, rax
+}
+
+// sete al (set if equal)
+cancion emit_sete_al() {
+    emit_byte(15);   // 0x0F
+    emit_byte(148);  // 0x94 SETE
+    emit_byte(192);  // 0xC0 al
+}
+
+// setl al (set if less)
+cancion emit_setl_al() {
+    emit_byte(15);   // 0x0F
+    emit_byte(156);  // 0x9C SETL
+    emit_byte(192);  // 0xC0 al
+}
+
+// setg al (set if greater)
+cancion emit_setg_al() {
+    emit_byte(15);   // 0x0F
+    emit_byte(159);  // 0x9F SETG
+    emit_byte(192);  // 0xC0 al
+}
+
+// movzx rax, al
+cancion emit_movzx_rax_al() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(15);   // 0x0F
+    emit_byte(182);  // 0xB6 MOVZX
+    emit_byte(192);  // 0xC0 rax, al
+}
+
+// syscall
+cancion emit_syscall() {
+    emit_byte(15);   // 0x0F
+    emit_byte(5);    // 0x05 SYSCALL
+}
+
+// jmp rel32
+cancion emit_jmp_rel32(offset: entero) {
+    emit_byte(233);  // 0xE9 JMP rel32
+    emit_dword(offset);
+}
+
+// je rel32 (jump if equal/zero)
+cancion emit_je_rel32(offset: entero) {
+    emit_byte(15);   // 0x0F
+    emit_byte(132);  // 0x84 JE rel32
+    emit_dword(offset);
+}
+
+// jne rel32 (jump if not equal)
+cancion emit_jne_rel32(offset: entero) {
+    emit_byte(15);   // 0x0F
+    emit_byte(133);  // 0x85 JNE rel32
+    emit_dword(offset);
+}
+
+// test rax, rax
+cancion emit_test_rax_rax() {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(133);  // 0x85 TEST
+    emit_byte(192);  // 0xC0 rax, rax
+}
+
+// sub rsp, imm8
+cancion emit_sub_rsp_imm8(val: entero) {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(131);  // 0x83
+    emit_byte(236);  // 0xEC sub rsp
+    emit_byte(val);
+}
+
+// mov [rbp-off], rax
+cancion emit_mov_rbp_off_rax(off: entero) {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(137);  // 0x89 MOV
+    si (off > 127) {
+        emit_byte(133);  // 0x85 [rbp + disp32]
+        emit_dword(0 - off);
+    } sino {
+        emit_byte(69);   // 0x45 [rbp + disp8]
+        emit_byte(256 - off);  // negative offset as unsigned byte
+    }
+}
+
+// mov rax, [rbp-off]
+cancion emit_mov_rax_rbp_off(off: entero) {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(139);  // 0x8B MOV
+    si (off > 127) {
+        emit_byte(133);  // 0x85 [rbp + disp32]
+        emit_dword(0 - off);
+    } sino {
+        emit_byte(69);   // 0x45 [rbp + disp8]
+        emit_byte(256 - off);
+    }
+}
+
+// lea rax, [rip+disp32]
+cancion emit_lea_rax_rip_rel(disp: entero) {
+    emit_byte(72);   // 0x48 REX.W
+    emit_byte(141);  // 0x8D LEA
+    emit_byte(5);    // 0x05 [rip+disp32]
+    emit_dword(disp);
+}
+
+// call rel32
+cancion emit_call_rel32(offset: entero) {
+    emit_byte(232);  // 0xE8 CALL rel32
+    emit_dword(offset);
+}
+
+// === STRING TABLE ===
+decreto strings: [4096]octeto;
+decreto str_offsets: [256]entero;
+decreto str_count: entero = 0;
+decreto str_pos: entero = 0;
+
+cancion add_string_data(s: entero, len: entero): entero {
+    // Copy string to data section, return offset
+    decreto start: entero = data_pos;
+    decreto i: entero = 0;
+    mientras (i < len) {
+        data[data_pos] = strings[s + i];
+        data_pos = data_pos + 1;
+        i = i + 1;
+    }
+    data[data_pos] = 0;
+    data_pos = data_pos + 1;
+    retorno start;
+}
+
+// === VARIABLE TABLE ===
+decreto var_names: [1024]octeto;
+decreto var_offsets: [64]entero;
+decreto var_count: entero = 0;
+decreto var_name_pos: entero = 0;
+decreto stack_offset: entero = 0;
+
+cancion add_var(name_idx: entero, size: entero): entero {
+    stack_offset = stack_offset + size;
+    var_offsets[var_count] = stack_offset;
+    var_count = var_count + 1;
+    retorno stack_offset;
+}
+
+cancion reset_vars() {
+    var_count = 0;
+    stack_offset = 0;
+}
+
+// === FUNCTION TABLE ===
+decreto func_offsets: [64]entero;
+decreto func_count: entero = 0;
+
+cancion add_func(code_off: entero): entero {
+    func_offsets[func_count] = code_off;
+    func_count = func_count + 1;
+    retorno func_count - 1;
+}
+
+// === CODE GENERATION ===
+
+cancion gen_func_prologue() {
+    emit_push_rbp();
+    emit_mov_rbp_rsp();
+}
+
+cancion gen_func_epilogue() {
+    emit_leave();
+    emit_ret();
+}
+
+cancion gen_syscall_write() {
+    // sys_write(fd, buf, count)
+    // rdi = fd, rsi = buf, rdx = count
+    emit_mov_rax_imm32(1);  // syscall number for write
+    emit_syscall();
+}
+
+cancion gen_syscall_exit() {
+    // sys_exit(code)
+    // rdi = exit code
+    emit_mov_rax_imm32(60);  // syscall number for exit
+    emit_syscall();
+}
+
+// Generate code to load a number into rax
+cancion gen_number(val: entero) {
+    emit_mov_rax_imm32(val);
+}
+
+// Generate binary operation
+cancion gen_binop(op: entero) {
+    // Left operand in rax, pushed
+    // Right operand computed, then in rax
+    // Pop left to rbx, compute result in rax
+    emit_pop_rbx();  // rbx = left
+    // rax = right
+
+    si (op == 11) {
+        // ADD: swap because we popped left to rbx
+        emit_add_rax_rbx();
+    }
+    si (op == 12) {
+        // SUB: rbx - rax, need to swap
+        emit_mov_rbx_rax();
+        emit_pop_rbx();
+        emit_sub_rax_rbx();
+    }
+    si (op == 16) {
+        // EQUALITY
+        emit_cmp_rax_rbx();
+        emit_xor_rax_rax();
+        emit_sete_al();
+        emit_movzx_rax_al();
+    }
+    si (op == 17) {
+        // LESS
+        emit_cmp_rax_rbx();
+        emit_xor_rax_rax();
+        emit_setl_al();
+        emit_movzx_rax_al();
+    }
+    si (op == 18) {
+        // GREATER
+        emit_cmp_rax_rbx();
+        emit_xor_rax_rax();
+        emit_setg_al();
+        emit_movzx_rax_al();
+    }
+}
+
+// === SIMPLE TEST ===
+cancion gen_test_program() {
+    // Generate a simple program that prints "Hi" and exits
+
+    // Add "Hi\n" to data section
+    data[0] = 72;   // H
+    data[1] = 105;  // i
+    data[2] = 10;   // newline
+    data_pos = 3;
+
+    // Entry point
+    gen_func_prologue();
+
+    // sys_write(1, "Hi\n", 3)
+    emit_mov_rax_imm32(1);      // fd = 1 (stdout)
+    emit_mov_rdi_rax();
+
+    // Load address of string (RIP-relative)
+    // Data section is at 0x10000 offset from code
+    decreto str_off: entero = 65536;  // 0x10000
+    decreto cur_pos: entero = code_pos;
+    decreto rip_rel: entero = str_off - cur_pos - 7;
+    emit_lea_rax_rip_rel(rip_rel);
+    emit_mov_rsi_rax();
+
+    emit_mov_rax_imm32(3);      // count = 3
+    emit_mov_rdx_rax();
+
+    gen_syscall_write();
+
+    // sys_exit(0)
+    emit_xor_rax_rax();
+    emit_mov_rdi_rax();
+    gen_syscall_exit();
+
+    gen_func_epilogue();
+}
+
+// === ELF GENERATION ===
+decreto elf_buf: [131072]octeto;  // 128KB for ELF file
+decreto elf_pos: entero = 0;
+
+cancion elf_byte(b: entero) {
+    elf_buf[elf_pos] = b;
+    elf_pos = elf_pos + 1;
+}
+
+cancion elf_word(w: entero) {
+    elf_buf[elf_pos] = w;
+    elf_buf[elf_pos + 1] = w / 256;
+    elf_pos = elf_pos + 2;
+}
+
+cancion elf_dword(d: entero) {
+    elf_buf[elf_pos] = d;
+    elf_buf[elf_pos + 1] = d / 256;
+    elf_buf[elf_pos + 2] = d / 65536;
+    elf_buf[elf_pos + 3] = d / 16777216;
+    elf_pos = elf_pos + 4;
+}
+
+cancion elf_qword(q: entero) {
+    elf_dword(q);
+    elf_dword(0);
+}
+
+cancion gen_elf_header() {
+    // ELF magic
+    elf_byte(127);  // 0x7F
+    elf_byte(69);   // E
+    elf_byte(76);   // L
+    elf_byte(70);   // F
+
+    // ELF class (64-bit)
+    elf_byte(2);
+    // Data encoding (little endian)
+    elf_byte(1);
+    // Version
+    elf_byte(1);
+    // OS/ABI
+    elf_byte(0);
+
+    // Padding (8 bytes)
+    elf_byte(0);
+    elf_byte(0);
+    elf_byte(0);
+    elf_byte(0);
+    elf_byte(0);
+    elf_byte(0);
+    elf_byte(0);
+    elf_byte(0);
+
+    // Type: executable
+    elf_word(2);
+    // Machine: x86-64
+    elf_word(62);
+    // Version
+    elf_dword(1);
+
+    // Entry point: 0x401000
+    elf_qword(4198400);  // 0x401000
+
+    // Program header offset: 64
+    elf_qword(64);
+
+    // Section header offset: 0 (none)
+    elf_qword(0);
+
+    // Flags
+    elf_dword(0);
+
+    // ELF header size: 64
+    elf_word(64);
+    // Program header size: 56
+    elf_word(56);
+    // Number of program headers: 2
+    elf_word(2);
+    // Section header size: 0
+    elf_word(0);
+    // Number of section headers: 0
+    elf_word(0);
+    // Section name string table index: 0
+    elf_word(0);
+}
+
+cancion gen_program_headers() {
+    // Text segment (code)
+    elf_dword(1);        // PT_LOAD
+    elf_dword(5);        // PF_R | PF_X
+    elf_qword(4096);     // File offset: 0x1000
+    elf_qword(4198400);  // Virtual address: 0x401000
+    elf_qword(4198400);  // Physical address: 0x401000
+    elf_qword(code_pos); // File size
+    elf_qword(code_pos); // Memory size
+    elf_qword(4096);     // Alignment
+
+    // Data segment
+    elf_dword(1);        // PT_LOAD
+    elf_dword(6);        // PF_R | PF_W
+    elf_qword(69632);    // File offset: 0x11000
+    elf_qword(4263936);  // Virtual address: 0x411000
+    elf_qword(4263936);  // Physical address: 0x411000
+    elf_qword(data_pos); // File size
+    elf_qword(data_pos); // Memory size
+    elf_qword(4096);     // Alignment
+}
+
+cancion gen_elf() {
+    gen_elf_header();
+    gen_program_headers();
+
+    // Pad to code section (offset 0x1000)
+    mientras (elf_pos < 4096) {
+        elf_byte(0);
+    }
+
+    // Write code
+    decreto i: entero = 0;
+    mientras (i < code_pos) {
+        elf_byte(code[i]);
+        i = i + 1;
+    }
+
+    // Pad to data section (offset 0x11000)
+    mientras (elf_pos < 69632) {
+        elf_byte(0);
+    }
+
+    // Write data
+    i = 0;
+    mientras (i < data_pos) {
+        elf_byte(data[i]);
+        i = i + 1;
+    }
+}
+
+// === MAIN ===
+cancion principal() {
+    // Messages to stderr (fd=2) so stdout is clean for binary
+    escribir_sys(2, "Viva Code Generator\n", 20);
+
+    // Generate test program
+    gen_test_program();
+
+    escribir_sys(2, "Code generated: ", 16);
+    si (code_pos > 0) {
+        escribir_sys(2, "ok\n", 3);
+    }
+
+    // Generate ELF
+    gen_elf();
+
+    escribir_sys(2, "ELF generated: ", 15);
+    si (elf_pos > 0) {
+        escribir_sys(2, "ok\n", 3);
+    }
+
+    // Write ELF to stdout (redirect to file: ./viva_codegen > output.bin)
+    escribir_sys(1, elf_buf, elf_pos);
+
+    salir_sys(0);
+}
