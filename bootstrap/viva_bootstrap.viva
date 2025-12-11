@@ -5,7 +5,7 @@
 // LEXER
 // ============================================================
 
-decreto src: [8192]octeto;
+decreto src: [65536]octeto;
 decreto src_len: entero = 0;
 decreto pos: entero = 0;
 decreto tok_type: entero = 0;
@@ -176,6 +176,9 @@ cancion siguiente_token() {
     saltar_espacios();
     si (pos >= src_len) { tok_type = 0; retorno; }
     decreto c: entero = src[pos];
+
+    // Null byte = EOF (avoids recursive stack overflow on empty buffer)
+    si (c == 0) { tok_type = 0; retorno; }
 
     si (c == 40) { tok_type = 4; pos = pos + 1; retorno; }
     si (c == 41) { tok_type = 5; pos = pos + 1; retorno; }
@@ -400,6 +403,7 @@ cancion is_kw_sino(): entero {
 // Symbol table for local variables
 decreto sym_names: [512]octeto;
 decreto sym_offs: [32]entero;
+decreto sym_sizes: [32]entero;
 decreto sym_cnt: entero = 0;
 decreto sym_np: entero = 0;
 decreto sym_sp: entero = 0;
@@ -603,6 +607,7 @@ cancion sym_add(): entero {
     sym_np = sym_np + 1;
     sym_sp = sym_sp - 8;
     sym_offs[sym_cnt] = sym_sp;
+    sym_sizes[sym_cnt] = 8;  // Scalar (8 bytes)
     sym_cnt = sym_cnt + 1;
     retorno sym_sp;
 }
@@ -619,9 +624,12 @@ cancion sym_add_size(size: entero): entero {
     sym_np = sym_np + 1;
     sym_sp = sym_sp - size;
     sym_offs[sym_cnt] = sym_sp;
+    sym_sizes[sym_cnt] = size;  // Track actual size
     sym_cnt = sym_cnt + 1;
     retorno sym_sp;
 }
+
+decreto g_sym_idx: entero = 0;  // Index of last found local (for array check)
 
 cancion sym_find(): entero {
     decreto i: entero = 0;
@@ -637,7 +645,10 @@ cancion sym_find(): entero {
             j = j + 1;
         }
         si (ok == 1) {
-            si (j == tok_len) { retorno sym_offs[i]; }
+            si (j == tok_len) {
+                g_sym_idx = i;
+                retorno sym_offs[i];
+            }
         }
         mientras (sym_names[p] != 0) { p = p + 1; }
         p = p + 1;
@@ -646,11 +657,18 @@ cancion sym_find(): entero {
     retorno 0;
 }
 
+cancion sym_is_array(): entero {
+    // Check if last found local (via g_sym_idx) is an array (size > 8)
+    si (g_sym_idx >= sym_cnt) { retorno 0; }  // Bounds check
+    si (sym_sizes[g_sym_idx] > 8) { retorno 1; }
+    retorno 0;
+}
+
 // ============================================================
 // CODE GENERATOR
 // ============================================================
 
-decreto code: [32768]octeto;
+decreto code: [65536]octeto;
 decreto code_pos: entero = 0;
 decreto data: [8192]octeto;
 decreto data_pos: entero = 0;
@@ -980,6 +998,76 @@ cancion emit_cmp_rax_0() {
     emit_byte(0);
 }
 
+// lea rax, [rbp+off] - get address of local variable/array
+cancion emit_lea_rbp_off(off: entero) {
+    emit_byte(72);   // REX.W
+    emit_byte(141);  // lea
+    emit_byte(133);  // ModRM: rax, [rbp+disp32]
+    emit_dword(off);
+}
+
+// movzx rax, byte [rax] - load byte from address in rax
+cancion emit_load_byte_indirect() {
+    emit_byte(72);   // REX.W
+    emit_byte(15);   // 0F prefix
+    emit_byte(182);  // movzx r64, r/m8
+    emit_byte(0);    // ModRM: rax, [rax]
+}
+
+// mov [rax], cl - store byte to address in rax
+cancion emit_store_byte_indirect() {
+    emit_byte(136);  // mov r/m8, r8
+    emit_byte(8);    // ModRM: [rax], cl
+}
+
+// mov rcx, rax (preserving value for store)
+cancion emit_mov_rax_to_rcx() {
+    emit_byte(72);
+    emit_byte(137);
+    emit_byte(193);
+}
+
+// Load global variable (8-byte value at data_base + offset)
+// Uses RIP-relative addressing: mov rax, [rip+disp32]
+cancion emit_load_global(off: entero) {
+    // Data section at 0x411000, code at 0x401000
+    // RIP-relative: target - (rip_after_instruction)
+    // target = 0x411000 + off
+    // rip_after = 0x401000 + code_pos + 7
+    // disp = 0x411000 + off - 0x401000 - code_pos - 7
+    //      = 65536 + off - code_pos - 7
+    emit_byte(72);   // REX.W
+    emit_byte(139);  // mov r64, r/m64
+    emit_byte(5);    // ModRM: rax, [rip+disp32]
+    decreto disp: entero = 65536 + off - code_pos - 4;
+    emit_dword(disp);
+}
+
+// Store global variable (8-byte value to data_base + offset)
+// Uses RIP-relative addressing: mov [rip+disp32], rax
+cancion emit_store_global(off: entero) {
+    emit_byte(72);   // REX.W
+    emit_byte(137);  // mov r/m64, r64
+    emit_byte(5);    // ModRM: [rip+disp32], rax
+    decreto disp: entero = 65536 + off - code_pos - 4;
+    emit_dword(disp);
+}
+
+// Load address of global (for arrays): lea rax, [rip+disp32]
+cancion emit_lea_global(off: entero) {
+    emit_byte(72);   // REX.W
+    emit_byte(141);  // lea
+    emit_byte(5);    // ModRM: rax, [rip+disp32]
+    decreto disp: entero = 65536 + off - code_pos - 4;
+    emit_dword(disp);
+}
+
+// Load byte from global (for byte arrays)
+cancion emit_load_global_byte(off: entero) {
+    emit_lea_global(off);
+    emit_load_byte_indirect();
+}
+
 // ============================================================
 // STRING DATA
 // ============================================================
@@ -1004,6 +1092,44 @@ cancion add_string(s: entero, len: entero): entero {
 
 // Forward declaration placeholder
 decreto parse_depth: entero = 0;
+
+// Global variable lookup - moved here to avoid forward reference issues
+decreto g_glob_idx: entero = 0;  // Index of last found global (for checking if array)
+
+cancion glob_find(): entero {
+    // Find global variable, return data offset + 1 (0 = not found)
+    // Also sets g_glob_idx for use by glob_is_array()
+    decreto i: entero = 0;
+    decreto p: entero = 0;
+    mientras (i < glob_cnt) {
+        decreto j: entero = 0;
+        decreto ok: entero = 1;
+        mientras (glob_names[p + j] != 0) {
+            si (j >= tok_len) { ok = 0; }
+            si (ok == 1) {
+                si (tok_buf[j] != glob_names[p + j]) { ok = 0; }
+            }
+            j = j + 1;
+        }
+        si (ok == 1) {
+            si (j == tok_len) {
+                g_glob_idx = i;
+                retorno glob_offs[i] + 1;
+            }
+        }
+        mientras (glob_names[p] != 0) { p = p + 1; }
+        p = p + 1;
+        i = i + 1;
+    }
+    retorno 0;
+}
+
+cancion glob_is_array(): entero {
+    // Check if last found global (via g_glob_idx) is an array (size > 8)
+    si (g_glob_idx >= glob_cnt) { retorno 0; }  // Bounds check
+    si (glob_sizes[g_glob_idx] > 8) { retorno 1; }
+    retorno 0;
+}
 
 // Compile a primary expression (number, variable, function call, or parenthesized)
 cancion compile_primary() {
@@ -1060,6 +1186,10 @@ cancion compile_primary() {
         // Identifier - could be variable or function call
         // First check if it's a local variable
         decreto off: entero = sym_find();
+
+        // Check for global variable (before siguiente_token consumes tok_buf)
+        decreto goff: entero = 0;
+        si (off == 0) { goff = glob_find(); }
 
         // Save identifier name for potential function call
         save_call_name();
@@ -1123,12 +1253,78 @@ cancion compile_primary() {
             retorno;
         }
 
-        // Not a function call - load variable
+        // Check if followed by '[' - then it's array element access
+        si (tok_type == 19) {
+            // Array access: name[index]
+            siguiente_token();  // skip [
+
+            // Get base address of array into rax (check local then global)
+            si (off != 0) {
+                emit_lea_rbp_off(off);
+            } sino {
+                // Use pre-computed goff
+                si (goff != 0) {
+                    emit_lea_global(goff - 1);
+                } sino {
+                    emit_xor_rax_rax();
+                }
+            }
+            emit_push();  // save base address
+
+            // Handle index - simplified to avoid recursion
+            si (tok_type == 2) {
+                // Number literal index
+                emit_mov_rax_imm32(tok_int_val);
+                siguiente_token();
+            } sino {
+                si (tok_type == 1) {
+                    // Variable index - check local then global
+                    decreto idx_off: entero = sym_find();
+                    decreto gidx: entero = 0;
+                    si (idx_off == 0) { gidx = glob_find(); }
+                    siguiente_token();  // consume before using
+                    si (idx_off != 0) {
+                        emit_load(idx_off);
+                    } sino {
+                        si (gidx != 0) {
+                            emit_load_global(gidx - 1);
+                        } sino {
+                            emit_xor_rax_rax();
+                        }
+                    }
+                } sino {
+                    emit_xor_rax_rax();
+                }
+            }
+
+            // Now: rax=index, stack top=base
+            emit_pop_rcx();  // rcx = base address
+            emit_add();      // rax = base + index (final address)
+            emit_load_byte_indirect();  // load byte from [rax]
+
+            si (tok_type == 20) { siguiente_token(); }  // skip ]
+            retorno;
+        }
+
+        // Not a function call or array access - load variable
+        // For arrays, load address; for scalars, load value
         si (off != 0) {
-            emit_load(off);
+            si (sym_is_array() == 1) {
+                emit_lea_rbp_off(off);  // Array: load address
+            } sino {
+                emit_load(off);  // Scalar: load value
+            }
         } sino {
-            // Unknown identifier, emit 0
-            emit_xor_rax_rax();
+            // Use pre-computed goff
+            si (goff != 0) {
+                si (glob_is_array() == 1) {
+                    emit_lea_global(goff - 1);  // Array: load address
+                } sino {
+                    emit_load_global(goff - 1);  // Scalar: load value
+                }
+            } sino {
+                emit_xor_rax_rax();
+            }
         }
         retorno;
     }
@@ -1308,9 +1504,10 @@ cancion compile_syscall_write() {
     // Now set up rsi (buf)
     si (is_str_lit == 1) {
         // Load string literal address from data section
+        // String literals are after globals, so add glob_data_pos
         decreto str_off: entero = str_lit_offsets[str_idx];
         decreto cur: entero = code_pos;
-        decreto rip_rel: entero = 65536 + str_off - cur - 7;
+        decreto rip_rel: entero = 65536 + glob_data_pos + str_off - cur - 7;
         emit_lea_rax_rip_rel(rip_rel);
         emit_mov_rsi_rax();
     } sino {
@@ -1515,13 +1712,78 @@ cancion compile_statement() {
         }
         // Check for assignment or function call
         g_assign_off = sym_find();
+        decreto g_glob_off: entero = 0;
+        si (g_assign_off == 0) { g_glob_off = glob_find(); }
         save_call_name();  // Save identifier for potential function call
         siguiente_token();  // consume identifier
         si (tok_type == 15) {
             // Assignment: identifier = expr
             siguiente_token();  // skip =
             compile_comparison();
-            emit_store(g_assign_off);
+            si (g_assign_off != 0) {
+                emit_store(g_assign_off);
+            } sino {
+                si (g_glob_off != 0) {
+                    emit_store_global(g_glob_off - 1);
+                }
+            }
+            si (tok_type == 8) { siguiente_token(); }  // skip ;
+            retorno;
+        }
+        si (tok_type == 19) {
+            // Array element assignment: identifier[index] = expr
+            // Get base address of array (local or global)
+            si (g_assign_off != 0) {
+                emit_lea_rbp_off(g_assign_off);
+            } sino {
+                si (g_glob_off != 0) {
+                    emit_lea_global(g_glob_off - 1);
+                }
+            }
+            emit_push();  // save base address
+
+            siguiente_token();  // skip [
+
+            // Handle index - simplified (number or variable only)
+            si (tok_type == 2) {
+                emit_mov_rax_imm32(tok_int_val);
+                siguiente_token();
+            } sino {
+                si (tok_type == 1) {
+                    decreto idx_off: entero = sym_find();
+                    decreto gidx_off: entero = 0;
+                    si (idx_off == 0) { gidx_off = glob_find(); }
+                    siguiente_token();  // consume identifier before emitting
+                    si (idx_off != 0) {
+                        emit_load(idx_off);
+                    } sino {
+                        si (gidx_off != 0) {
+                            emit_load_global(gidx_off - 1);
+                        } sino {
+                            emit_xor_rax_rax();
+                        }
+                    }
+                } sino {
+                    emit_xor_rax_rax();
+                }
+            }
+
+            // Now: rax=index, stack top=base
+            emit_pop_rcx();  // rcx = base address
+            emit_add();      // rax = base + index = final address
+            emit_push();     // save destination address
+
+            si (tok_type == 20) { siguiente_token(); }  // skip ]
+            si (tok_type == 15) { siguiente_token(); }  // skip =
+
+            // Compile value expression
+            compile_comparison();
+
+            // Now: rax=value, stack top=address
+            emit_mov_rax_to_rcx();  // rcx = value to store
+            emit_pop();             // rax = destination address
+            emit_store_byte_indirect();  // mov [rax], cl
+
             si (tok_type == 8) { siguiente_token(); }  // skip ;
             retorno;
         }
@@ -1657,43 +1919,33 @@ cancion glob_add(size: entero): entero {
     retorno glob_offs[glob_cnt - 1];
 }
 
-cancion glob_find(): entero {
-    // Find global variable, return data offset + 1 (0 = not found)
-    decreto i: entero = 0;
-    decreto p: entero = 0;
-    mientras (i < glob_cnt) {
-        decreto j: entero = 0;
-        decreto ok: entero = 1;
-        mientras (glob_names[p + j] != 0) {
-            si (j >= tok_len) { ok = 0; }
-            si (ok == 1) {
-                si (tok_buf[j] != glob_names[p + j]) { ok = 0; }
-            }
-            j = j + 1;
-        }
-        si (ok == 1) {
-            si (j == tok_len) { retorno glob_offs[i] + 1; }
-        }
-        mientras (glob_names[p] != 0) { p = p + 1; }
-        p = p + 1;
-        i = i + 1;
-    }
-    retorno 0;
-}
-
 cancion compile_global_var() {
     // Global variable declaration: decreto name: [size]type;
     siguiente_token();  // skip decreto
 
-    // tok_buf now has variable name
+    // tok_buf now has variable name - save name info before moving on
+    decreto name_len: entero = tok_len;
     decreto var_size: entero = 8;
     decreto elem_size: entero = 1;
+    decreto is_array: entero = 0;
+
+    // Save name to glob_names before siguiente_token overwrites tok_buf
+    decreto name_start: entero = glob_np;
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        glob_names[glob_np] = tok_buf[i];
+        glob_np = glob_np + 1;
+        i = i + 1;
+    }
+    glob_names[glob_np] = 0;
+    glob_np = glob_np + 1;
 
     siguiente_token();  // move past name
     si (tok_type == 9) { siguiente_token(); }  // skip :
 
     // Check for array type: [size]type
     si (tok_type == 19) {
+        is_array = 1;
         siguiente_token();  // skip [
         si (tok_type == 2) {
             var_size = tok_int_val;
@@ -1715,7 +1967,13 @@ cancion compile_global_var() {
         si (tok_type == 1) { siguiente_token(); }
     }
 
-    // Skip initializer if present (we'll initialize to 0)
+    // Register the global variable
+    glob_offs[glob_cnt] = glob_data_pos;
+    glob_sizes[glob_cnt] = var_size;
+    glob_cnt = glob_cnt + 1;
+    glob_data_pos = glob_data_pos + var_size;
+
+    // Skip initializer if present (globals initialize to 0 in BSS)
     si (tok_type == 15) {
         siguiente_token();  // skip =
         si (tok_type == 2) { siguiente_token(); }  // skip number
@@ -1801,8 +2059,8 @@ cancion gen_program_headers() {
     elf_qword(code_pos); elf_qword(code_pos);
     elf_qword(4096);
 
-    // Data section includes string literals + other data
-    decreto total_data: entero = str_lit_pos + data_pos;
+    // Data section includes globals + string literals + other data
+    decreto total_data: entero = glob_data_pos + str_lit_pos + data_pos;
     elf_dword(1); elf_dword(6);
     elf_qword(69632);
     elf_qword(4263936); elf_qword(4263936);
@@ -1823,6 +2081,13 @@ cancion gen_elf() {
     }
 
     mientras (elf_pos < 69632) { elf_byte(0); }
+
+    // Write global variables first (zeroed BSS-style)
+    i = 0;
+    mientras (i < glob_data_pos) {
+        elf_byte(0);
+        i = i + 1;
+    }
 
     // Write string literals to data section
     i = 0;
@@ -1848,12 +2113,16 @@ cancion principal() {
     escribir_sys(2, "Reading source from stdin...\n", 29);
 
     // Read source from stdin
-    src_len = leer_sys(0, src, 8192);
-
-    si (src_len < 1) {
+    leer_sys(0, src, 65536);
+    // NOTE: leer_sys-as-expression crashes during self-compilation due to
+    // what appears to be a stack overflow in recursive compilation.
+    // Workaround: check if first byte is non-zero to detect input.
+    si (src[0] == 0) {
         escribir_sys(2, "Error: no input\n", 16);
         salir_sys(1);
     }
+    // Set src_len to max for now (lexer will stop at EOF)
+    src_len = 65536;
 
     escribir_sys(2, "Compiling...\n", 13);
 
