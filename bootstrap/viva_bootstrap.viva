@@ -259,6 +259,89 @@ decreto g_loop_start: entero = 0;
 decreto g_je_addr: entero = 0;
 decreto g_assign_off: entero = 0;
 
+// Function table for tracking function addresses
+decreto fn_names: [2048]octeto;
+decreto fn_addrs: [128]entero;
+decreto fn_cnt: entero = 0;
+decreto fn_np: entero = 0;
+decreto main_addr: entero = 0;  // Entry point (address of main function)
+
+// Forward reference patches (calls to not-yet-defined functions)
+decreto patch_addrs: [256]entero;    // Code addresses to patch
+decreto patch_fn_idx: [256]entero;   // Which function index (in temp name storage)
+decreto patch_cnt: entero = 0;
+
+// Temporary storage for function name being called
+decreto call_name: [64]octeto;
+decreto call_name_len: entero = 0;
+
+cancion fn_add() {
+    // Add current function (tok_buf) to function table with address code_pos
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        fn_names[fn_np] = tok_buf[i];
+        fn_np = fn_np + 1;
+        i = i + 1;
+    }
+    fn_names[fn_np] = 0;
+    fn_np = fn_np + 1;
+    fn_addrs[fn_cnt] = code_pos;
+
+    // Check if this is "main" - set entry point
+    // "main" = 109, 97, 105, 110
+    decreto is_main: entero = 0;
+    si (tok_len == 4) {
+        si (tok_buf[0] == 109) {
+            si (tok_buf[1] == 97) {
+                si (tok_buf[2] == 105) {
+                    si (tok_buf[3] == 110) {
+                        is_main = 1;
+                    }
+                }
+            }
+        }
+    }
+    si (is_main == 1) {
+        main_addr = code_pos;
+    }
+
+    fn_cnt = fn_cnt + 1;
+}
+
+cancion fn_find(): entero {
+    // Find function by name in call_name, return address+1 (0 means not found)
+    decreto i: entero = 0;
+    decreto p: entero = 0;
+    mientras (i < fn_cnt) {
+        decreto j: entero = 0;
+        decreto ok: entero = 1;
+        mientras (fn_names[p + j] != 0) {
+            si (j >= call_name_len) { ok = 0; }
+            si (ok == 1) {
+                si (call_name[j] != fn_names[p + j]) { ok = 0; }
+            }
+            j = j + 1;
+        }
+        si (ok == 1) {
+            si (j == call_name_len) { retorno fn_addrs[i] + 1; }
+        }
+        mientras (fn_names[p] != 0) { p = p + 1; }
+        p = p + 1;
+        i = i + 1;
+    }
+    retorno 0;
+}
+
+cancion save_call_name() {
+    // Copy tok_buf to call_name for later lookup
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        call_name[i] = tok_buf[i];
+        i = i + 1;
+    }
+    call_name_len = tok_len;
+}
+
 cancion sym_reset() {
     sym_cnt = 0;
     sym_np = 0;
@@ -608,6 +691,27 @@ cancion emit_call(): entero {
     retorno addr;
 }
 
+// call with relative offset to target address
+cancion emit_call_rel(target: entero) {
+    emit_byte(232);
+    decreto rel: entero = target - code_pos - 4;
+    emit_dword(rel);
+}
+
+// mov rdi, rax (for first argument)
+cancion emit_mov_rdi_from_rax() {
+    emit_byte(72);   // REX.W
+    emit_byte(137);  // mov r/m64, r64
+    emit_byte(199);  // ModRM: rdi <- rax
+}
+
+// mov rsi, rax (for second argument)
+cancion emit_mov_rsi_from_rax() {
+    emit_byte(72);   // REX.W
+    emit_byte(137);  // mov r/m64, r64
+    emit_byte(198);  // ModRM: rsi <- rax
+}
+
 // cmp rax, 0
 cancion emit_cmp_rax_0() {
     emit_byte(72);
@@ -641,7 +745,7 @@ cancion add_string(s: entero, len: entero): entero {
 // Forward declaration placeholder
 decreto parse_depth: entero = 0;
 
-// Compile a primary expression (number, variable, or parenthesized)
+// Compile a primary expression (number, variable, function call, or parenthesized)
 cancion compile_primary() {
     si (tok_type == 2) {
         // Number literal
@@ -657,15 +761,57 @@ cancion compile_primary() {
         retorno;
     }
     si (tok_type == 1) {
-        // Identifier - local variable
+        // Identifier - could be variable or function call
+        // First check if it's a local variable
         decreto off: entero = sym_find();
+
+        // Save identifier name for potential function call
+        save_call_name();
+        siguiente_token();  // skip identifier
+
+        // Check if followed by '(' - then it's a function call
+        si (tok_type == 4) {
+            // Function call: name(args)
+            // Look up function BEFORE compiling arguments (args compilation clobbers call_name)
+            decreto fn_addr: entero = fn_find();
+
+            siguiente_token();  // skip (
+
+            // Compile arguments (up to 2 for now)
+            decreto arg_count: entero = 0;
+            si (tok_type != 5) {
+                // First argument -> rdi
+                compile_term();
+                emit_mov_rdi_from_rax();
+                arg_count = 1;
+
+                si (tok_type == 10) {
+                    // Second argument -> rsi
+                    siguiente_token();  // skip ,
+                    compile_comparison();
+                    emit_mov_rsi_from_rax();
+                    arg_count = 2;
+                }
+            }
+            si (tok_type == 5) { siguiente_token(); }  // skip )
+
+            // Emit call
+            si (fn_addr != 0) {
+                emit_call_rel(fn_addr - 1);  // -1 because fn_find returns addr+1
+            } sino {
+                // Forward reference - emit call with 0 offset (TODO: patch later)
+                emit_call();
+            }
+            retorno;
+        }
+
+        // Not a function call - load variable
         si (off != 0) {
             emit_load(off);
         } sino {
             // Unknown identifier, emit 0
             emit_xor_rax_rax();
         }
-        siguiente_token();
         retorno;
     }
     // Default: 0
@@ -912,14 +1058,44 @@ cancion compile_statement() {
             emit_patch(g_je_addr);
             retorno;
         }
-        // Check for assignment: identifier = expr
+        // Check for assignment or function call
         g_assign_off = sym_find();
+        save_call_name();  // Save identifier for potential function call
         siguiente_token();  // consume identifier
         si (tok_type == 15) {
-            // Assignment
+            // Assignment: identifier = expr
             siguiente_token();  // skip =
             compile_comparison();
             emit_store(g_assign_off);
+            si (tok_type == 8) { siguiente_token(); }  // skip ;
+            retorno;
+        }
+        si (tok_type == 4) {
+            // Function call as statement: identifier(args);
+            decreto fn_addr: entero = fn_find();
+            siguiente_token();  // skip (
+
+            // Compile arguments (up to 2 for now)
+            si (tok_type != 5) {
+                // First argument -> rdi
+                compile_comparison();
+                emit_mov_rdi_from_rax();
+
+                si (tok_type == 10) {
+                    // Second argument -> rsi
+                    siguiente_token();  // skip ,
+                    compile_comparison();
+                    emit_mov_rsi_from_rax();
+                }
+            }
+            si (tok_type == 5) { siguiente_token(); }  // skip )
+
+            // Emit call
+            si (fn_addr != 0) {
+                emit_call_rel(fn_addr - 1);  // -1 because fn_find returns addr+1
+            } sino {
+                emit_call();
+            }
             si (tok_type == 8) { siguiente_token(); }  // skip ;
             retorno;
         }
@@ -932,16 +1108,36 @@ cancion compile_statement() {
 }
 
 cancion compile_function() {
-    // cancion name() { ... }
+    // cancion name(params) { ... }
     sym_reset();  // Reset symbol table for new function
     siguiente_token();  // skip cancion
+
+    // Register function name and address BEFORE emitting prologue
+    fn_add();  // Records tok_buf (function name) with current code_pos
     siguiente_token();  // skip name
+
     si (tok_type == 4) { siguiente_token(); }  // skip (
-    // Skip parameters for now (TODO: handle params)
+
+    // Parse parameters: name: type, name: type, ...
+    decreto param_count: entero = 0;
     mientras (tok_type != 5) {
-        siguiente_token();
+        si (tok_type == 1) {
+            // Parameter name - add to symbol table
+            sym_add();
+            param_count = param_count + 1;
+            siguiente_token();  // skip name
+            si (tok_type == 9) {
+                siguiente_token();  // skip :
+                si (tok_type == 1) {
+                    siguiente_token();  // skip type
+                }
+            }
+        } sino {
+            siguiente_token();  // skip , or other
+        }
     }
     si (tok_type == 5) { siguiente_token(); }  // skip )
+
     // Skip return type if present
     si (tok_type == 9) {
         siguiente_token();  // skip :
@@ -952,6 +1148,23 @@ cancion compile_function() {
     emit_push_rbp();
     emit_mov_rbp_rsp();
     emit_sub_rsp(256);  // Reserve stack space
+
+    // Copy parameters from registers to stack (System V ABI)
+    // rdi=arg1, rsi=arg2, rdx=arg3, rcx=arg4, r8=arg5, r9=arg6
+    si (param_count > 0) {
+        // mov [rbp-8], rdi
+        emit_byte(72);
+        emit_byte(137);
+        emit_byte(125);
+        emit_byte(248);  // -8
+    }
+    si (param_count > 1) {
+        // mov [rbp-16], rsi
+        emit_byte(72);
+        emit_byte(137);
+        emit_byte(117);
+        emit_byte(240);  // -16
+    }
 
     mientras (tok_type != 7) {
         compile_statement();
@@ -1016,7 +1229,7 @@ cancion gen_elf_header() {
     elf_byte(0); elf_byte(0); elf_byte(0); elf_byte(0);
     elf_byte(0); elf_byte(0); elf_byte(0); elf_byte(0);
     elf_word(2); elf_word(62); elf_dword(1);
-    elf_qword(4198400);
+    elf_qword(4198400 + main_addr);  // Entry point = code base + main offset
     elf_qword(64);
     elf_qword(0);
     elf_dword(0);

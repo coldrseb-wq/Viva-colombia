@@ -16,6 +16,7 @@
 #define MAX_FUNCS 256
 #define MAX_PARAMS 6
 #define MAX_GLOBALS 128
+#define MAX_CALL_PATCHES 1024
 
 typedef enum { OUT_C, OUT_ASM, OUT_ELF, OUT_STANDALONE } OutMode;
 
@@ -50,6 +51,11 @@ typedef struct {
     int size;
     int64_t init_value; // Initial value (for constant initializers)
 } GlobalVar;
+
+typedef struct {
+    char func_name[64];  // Name of function being called
+    int patch_offset;    // Offset in code where rel32 needs to be patched
+} CallPatch;
 
 typedef struct {
     FILE* f;
