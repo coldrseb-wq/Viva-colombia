@@ -363,10 +363,10 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             else if (c->mc) {
                 char* l = add_str(c, n->value);
                 int str_off = get_str_offset(c, l);
-                // For standalone ELF: data section is at offset 0x1000 from code
-                // RIP-relative offset = 0x1000 + str_off - current_pos - 7
+                // For standalone ELF: data section is at fixed 64KB (0x10000) offset from code
+                // RIP-relative offset = 0x10000 + str_off - current_pos - 7
                 int cur_pos = c->mc->size;
-                int rip_rel = 0x1000 + str_off - cur_pos - 7;
+                int rip_rel = 0x10000 + str_off - cur_pos - 7;
                 encode_lea_rax_rip_rel(c->mc, rip_rel);
             }
             break;
@@ -384,7 +384,7 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                     char* l = add_str(c, n->value);
                     int str_off = get_str_offset(c, l);
                     int cur_pos = c->mc->size;
-                    int rip_rel = 0x1000 + str_off - cur_pos - 7;
+                    int rip_rel = 0x10000 + str_off - cur_pos - 7;
                     encode_lea_rax_rip_rel(c->mc, rip_rel);
                 }
             } else {
@@ -396,7 +396,7 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                     int cur_pos = c->mc->size;
                     // Global vars are after strings in data section
                     // strings_size is tracked by data_size before globals are added
-                    int base_off = 0x1000 + goff;
+                    int base_off = 0x10000 + goff;
                     if (type == VIVA_TYPE_ARREGLO) {
                         // LEA rax, [rip + offset]
                         int rip_rel = base_off - cur_pos - 7;
@@ -629,8 +629,9 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                 emit(c, "]");
             }
             else if (n->left && n->left->type == IDENTIFIER_NODE) {
-                int off = get_var_off(c, n->left->value);
-                VivaType arr_type = get_var_type(c, n->left->value);
+                const char* arr_name = n->left->value;
+                int is_global = is_global_var(c, arr_name);
+                VivaType arr_type = is_global ? get_global_type(c, arr_name) : get_var_type(c, arr_name);
 
                 // Determine if byte array (element size 1) or regular (element size 8)
                 int elem_size = (arr_type == VIVA_TYPE_ARREGLO) ? 1 : 8;
@@ -642,6 +643,7 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                     if (elem_size > 1) {
                         emit(c, "    imul rax, %d\n", elem_size);
                     }
+                    int off = get_var_off(c, arr_name);
                     emit(c, "    lea rbx, [rbp%+d]\n", off);
                     emit(c, "    add rax, rbx\n");
                     if (elem_size == 1) {
@@ -655,8 +657,25 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                         encode_mov_rbx_imm32(c->mc, elem_size);
                         encode_mul_rbx(c->mc);
                     }
-                    encode_lea_rbx_rbp_off(c->mc, off);
+                    // rax now has index (possibly scaled)
+                    encode_push_rax(c->mc);  // Save index
+
+                    if (is_global) {
+                        // Global array: load address using RIP-relative
+                        int goff = get_global_offset(c, arr_name);
+                        int cur_pos = c->mc->size;
+                        int rip_rel = 0x10000 + goff - cur_pos - 7;
+                        encode_lea_rax_rip_rel(c->mc, rip_rel);
+                        encode_mov_rbx_rax(c->mc);  // rbx = &arr[0]
+                    } else {
+                        // Local array: use RBP-relative
+                        int off = get_var_off(c, arr_name);
+                        encode_lea_rbx_rbp_off(c->mc, off);
+                    }
+
+                    encode_pop_rax(c->mc);  // Restore index
                     encode_add_rax_rbx(c->mc);  // rax = &arr[index]
+
                     if (elem_size == 1) {
                         // Move address to rbx for byte load
                         encode_mov_rbx_rax(c->mc);
@@ -929,7 +948,7 @@ static void compile_var(Compiler* c, ASTNode* n) {
                 else if (c->mc) {
                     int str_off = get_str_offset(c, l);
                     int cur_pos = c->mc->size;
-                    int rip_rel = 0x1000 + str_off - cur_pos - 7;
+                    int rip_rel = 0x10000 + str_off - cur_pos - 7;
                     encode_lea_rax_rip_rel(c->mc, rip_rel);
                 }
                 is_str = 1;
@@ -964,17 +983,12 @@ static void compile_assign(Compiler* c, ASTNode* n) {
             ASTNode* idx = n->extra->right;
 
             if (arr && arr->type == IDENTIFIER_NODE) {
-                int off = get_var_off(c, arr->value);
-                VivaType arr_type = get_var_type(c, arr->value);
+                const char* arr_name = arr->value;
+                int is_global = is_global_var(c, arr_name);
+                VivaType arr_type = is_global ? get_global_type(c, arr_name) : get_var_type(c, arr_name);
 
                 // Determine element size (1 for octeto arrays, 8 otherwise)
-                int elem_size = 8;
-                int i = find_var(c, arr->value);
-                if (i >= 0 && arr_type == VIVA_TYPE_ARREGLO) {
-                    // Check if it's a byte array (size stored == number of elements for byte arrays)
-                    // For byte arrays, element size is 1
-                    elem_size = 1;  // Assume byte arrays for now
-                }
+                int elem_size = (arr_type == VIVA_TYPE_ARREGLO) ? 1 : 8;
 
                 if (c->mode == OUT_C) {
                     ind(c);
@@ -992,7 +1006,21 @@ static void compile_assign(Compiler* c, ASTNode* n) {
                         encode_mov_rbx_imm32(c->mc, elem_size);
                         encode_mul_rbx(c->mc);          // rax *= elem_size
                     }
-                    encode_lea_rbx_rbp_off(c->mc, off); // rbx = &arr[0]
+
+                    // Get base address (global or local)
+                    if (is_global) {
+                        encode_push_rax(c->mc);         // save index*size
+                        int goff = get_global_offset(c, arr_name);
+                        int cur_pos = c->mc->size;
+                        int rip_rel = 0x10000 + goff - cur_pos - 7;
+                        encode_lea_rax_rip_rel(c->mc, rip_rel);  // rax = &arr[0]
+                        encode_mov_rbx_rax(c->mc);               // rbx = &arr[0]
+                        encode_pop_rax(c->mc);                   // restore index*size
+                    } else {
+                        int off = get_var_off(c, arr_name);
+                        encode_lea_rbx_rbp_off(c->mc, off);      // rbx = &arr[0]
+                    }
+
                     encode_add_rax_rbx(c->mc);          // rax = &arr[index]
                     encode_push_rax(c->mc);             // save address
 
@@ -1026,7 +1054,7 @@ static void compile_assign(Compiler* c, ASTNode* n) {
         compile_expr(c, n->left);  // value in rax
         int goff = get_global_offset(c, n->value);
         int cur_pos = c->mc->size;
-        int base_off = 0x1000 + goff;
+        int base_off = 0x10000 + goff;
         int rip_rel = base_off - cur_pos - 7;
         encode_mov_rip_rel_from_rax(c->mc, rip_rel);
     }

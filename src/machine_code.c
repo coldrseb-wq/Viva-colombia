@@ -598,9 +598,10 @@ int write_standalone_elf(ELFFile* e, MachineCode* mc, uint8_t* data, size_t data
     if (!f) return -1;
 
     // Setup for standalone executable
+    // Use fixed 64KB offset for data section to ensure consistent RIP-relative addressing
     uint64_t base_addr = 0x400000;
     uint64_t text_vaddr = base_addr + 0x1000;
-    uint64_t data_vaddr = (text_vaddr + mc->size + 0xFFF) & ~0xFFF;
+    uint64_t data_vaddr = text_vaddr + 0x10000;  // Fixed 64KB offset
 
     // ELF header for executable
     Elf64_Ehdr hdr = {0};
@@ -635,7 +636,7 @@ int write_standalone_elf(ELFFile* e, MachineCode* mc, uint8_t* data, size_t data
     if (data_size > 0) {
         data_ph.p_type = PT_LOAD;
         data_ph.p_flags = PF_R | PF_W;
-        data_ph.p_offset = 0x2000;
+        data_ph.p_offset = 0x11000;  // 64KB + ELF header offset
         data_ph.p_vaddr = data_vaddr;
         data_ph.p_paddr = data_vaddr;
         data_ph.p_filesz = data_size;
@@ -661,7 +662,7 @@ int write_standalone_elf(ELFFile* e, MachineCode* mc, uint8_t* data, size_t data
 
     // Pad to data segment
     if (data_size > 0) {
-        while (ftell(f) < 0x2000) fwrite(&zero, 1, 1, f);
+        while (ftell(f) < 0x11000) fwrite(&zero, 1, 1, f);
         fwrite(data, 1, data_size, f);
     }
 
