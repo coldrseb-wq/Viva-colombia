@@ -48,6 +48,17 @@ void free_type_desc(TypeDesc* td) {
     }
 }
 
+TypeDesc* clone_type_desc(TypeDesc* td) {
+    if (!td) return NULL;
+    TypeDesc* clone = calloc(1, sizeof(TypeDesc));
+    clone->base_type = td->base_type;
+    clone->array_size = td->array_size;
+    clone->pointer_depth = td->pointer_depth;
+    if (td->element_type) clone->element_type = clone_type_desc(td->element_type);
+    if (td->struct_name) clone->struct_name = strdup(td->struct_name);
+    return clone;
+}
+
 // === AST NODE FUNCTIONS ===
 
 ASTNode* init_ast_node(NodeType type) {
@@ -163,7 +174,8 @@ ASTNode* parse_type(TokenStream* tokens, int* pos) {
         type_node = init_ast_node(POINTER_TYPE_NODE);
         type_node->left = inner_type;
         if (inner_type && inner_type->type_info) {
-            type_node->type_info = create_pointer_type(inner_type->type_info);
+            // Clone the type to avoid double-free when AST is freed
+            type_node->type_info = create_pointer_type(clone_type_desc(inner_type->type_info));
         }
         return type_node;
     }
@@ -184,7 +196,8 @@ ASTNode* parse_type(TokenStream* tokens, int* pos) {
         type_node->value = strdup("arreglo");
         type_node->left = inner_type;
         if (inner_type && inner_type->type_info) {
-            type_node->type_info = create_array_type(inner_type->type_info, size);
+            // Clone the type to avoid double-free when AST is freed
+            type_node->type_info = create_array_type(clone_type_desc(inner_type->type_info), size);
         }
         return type_node;
     }
@@ -862,6 +875,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
     }
 
     // If statement: si (cond) { ... } sino { ... }
+    // Structure: left=condition, extra=then_body, params=else_body (right reserved for statement chaining)
     if (current->type == SI) {
         (*pos)++;
         node = init_ast_node(IF_SPANISH_NODE);
@@ -874,7 +888,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
             }
         }
 
-        // Then block
+        // Then block -> stored in extra
         if (*pos < tokens->count && tokens->tokens[*pos]->type == LBRACE) {
             (*pos)++;
             ASTNode* then_body = NULL;
@@ -895,14 +909,14 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                     (*pos)++;
                 }
             }
-            node->right = then_body;
+            node->extra = then_body;  // Changed from node->right
 
             if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACE) {
                 (*pos)++;
             }
         }
 
-        // Else block: sino { ... }
+        // Else block: sino { ... } -> stored in params
         if (*pos < tokens->count && tokens->tokens[*pos]->type == SINO) {
             (*pos)++;
 
@@ -926,7 +940,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                         (*pos)++;
                     }
                 }
-                node->extra = else_body;
+                node->params = else_body;  // Changed from node->extra
 
                 if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACE) {
                     (*pos)++;
@@ -937,6 +951,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
     }
 
     // While loop: mientras (cond) { ... }
+    // Structure: left=condition, extra=body (right reserved for statement chaining)
     if (current->type == MIENTRAS) {
         (*pos)++;
         node = init_ast_node(WHILE_SPANISH_NODE);
@@ -969,7 +984,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                     (*pos)++;
                 }
             }
-            node->right = body;
+            node->extra = body;  // Changed from node->right
 
             if (*pos < tokens->count && tokens->tokens[*pos]->type == RBRACE) {
                 (*pos)++;
@@ -1084,7 +1099,7 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
     if (current->type == IDENTIFIER) {
         int next_pos = *pos + 1;
 
-        // Assignment
+        // Simple assignment: identifier = expr
         if (next_pos < tokens->count && tokens->tokens[next_pos]->type == ASSIGN) {
             node = init_ast_node(ASSIGN_NODE);
             node->value = strdup(current->value);
@@ -1094,6 +1109,33 @@ ASTNode* parse_statement(TokenStream* tokens, int* pos) {
                 (*pos)++;
             }
             return node;
+        }
+
+        // Array element or field assignment: identifier[idx] = expr; or obj.field = expr
+        if (next_pos < tokens->count &&
+            (tokens->tokens[next_pos]->type == LBRACKET ||
+             tokens->tokens[next_pos]->type == DOT ||
+             tokens->tokens[next_pos]->type == ARROW)) {
+            // Parse the left side as expression
+            ASTNode* lhs = parse_expression(tokens, pos);
+
+            // Check if followed by assignment
+            if (*pos < tokens->count && tokens->tokens[*pos]->type == ASSIGN) {
+                (*pos)++;
+                node = init_ast_node(ASSIGN_NODE);
+                node->extra = lhs;  // Store complex LHS in extra
+                node->left = parse_expression(tokens, pos);
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                    (*pos)++;
+                }
+                return node;
+            } else {
+                // Not an assignment, just expression statement
+                if (*pos < tokens->count && tokens->tokens[*pos]->type == SEMICOLON) {
+                    (*pos)++;
+                }
+                return lhs;
+            }
         }
     }
 

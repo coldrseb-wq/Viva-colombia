@@ -322,12 +322,20 @@ static void compile_expr(Compiler* c, ASTNode* n) {
                 if (c->mode == OUT_C) emit(c, "%s", n->value);
                 else if (c->mode == OUT_ASM) {
                     int off = get_var_off(c, n->value);
-                    emit(c, "    mov rax, [rbp%+d]\n", off);
+                    VivaType type = get_var_type(c, n->value);
+                    if (type == VIVA_TYPE_ARREGLO) {
+                        emit(c, "    lea rax, [rbp%+d]\n", off);
+                    } else {
+                        emit(c, "    mov rax, [rbp%+d]\n", off);
+                    }
                 }
                 else if (c->mc) {
                     int off = get_var_off(c, n->value);
                     VivaType type = get_var_type(c, n->value);
-                    if (type == VIVA_TYPE_OCTETO) {
+                    if (type == VIVA_TYPE_ARREGLO) {
+                        // Arrays: load address, not value
+                        encode_lea_rax_rbp_off(c->mc, off);
+                    } else if (type == VIVA_TYPE_OCTETO) {
                         encode_movzx_rax_byte_memory(c->mc, off);
                     } else {
                         encode_mov_rax_from_memory(c->mc, off);
@@ -529,21 +537,40 @@ static void compile_expr(Compiler* c, ASTNode* n) {
             }
             else if (n->left && n->left->type == IDENTIFIER_NODE) {
                 int off = get_var_off(c, n->left->value);
+                VivaType arr_type = get_var_type(c, n->left->value);
+
+                // Determine if byte array (element size 1) or regular (element size 8)
+                int elem_size = (arr_type == VIVA_TYPE_ARREGLO) ? 1 : 8;
+
                 // Load index
                 compile_expr(c, n->right);
-                // Multiply by 8 (element size)
+
                 if (c->mode == OUT_ASM) {
-                    emit(c, "    imul rax, 8\n");
+                    if (elem_size > 1) {
+                        emit(c, "    imul rax, %d\n", elem_size);
+                    }
                     emit(c, "    lea rbx, [rbp%+d]\n", off);
                     emit(c, "    add rax, rbx\n");
-                    emit(c, "    mov rax, [rax]\n");
+                    if (elem_size == 1) {
+                        emit(c, "    movzx rax, byte [rax]\n");
+                    } else {
+                        emit(c, "    mov rax, [rax]\n");
+                    }
                 }
                 else if (c->mc) {
-                    encode_mov_rbx_imm32(c->mc, 8);
-                    encode_mul_rbx(c->mc);
+                    if (elem_size > 1) {
+                        encode_mov_rbx_imm32(c->mc, elem_size);
+                        encode_mul_rbx(c->mc);
+                    }
                     encode_lea_rbx_rbp_off(c->mc, off);
-                    encode_add_rax_rbx(c->mc);
-                    encode_mov_rax_from_rax_ptr(c->mc);
+                    encode_add_rax_rbx(c->mc);  // rax = &arr[index]
+                    if (elem_size == 1) {
+                        // Move address to rbx for byte load
+                        encode_mov_rbx_rax(c->mc);
+                        encode_movzx_rax_byte_rbx_ptr(c->mc);  // movzx rax, byte [rbx]
+                    } else {
+                        encode_mov_rax_from_rax_ptr(c->mc);
+                    }
                 }
             }
             break;
@@ -760,8 +787,18 @@ static void compile_var(Compiler* c, ASTNode* n) {
 
     // Check type annotation
     if (n->extra && n->extra->type_info) {
-        type = n->extra->type_info->base_type;
-        if (type == VIVA_TYPE_OCTETO) size = 1;
+        TypeDesc* td = n->extra->type_info;
+        type = td->base_type;
+        if (type == VIVA_TYPE_OCTETO) {
+            size = 1;
+        } else if (type == VIVA_TYPE_ARREGLO) {
+            // Calculate array size: array_size * element_size
+            int elem_size = 8;  // Default to 8 bytes
+            if (td->element_type) {
+                if (td->element_type->base_type == VIVA_TYPE_OCTETO) elem_size = 1;
+            }
+            size = (td->array_size > 0) ? td->array_size * elem_size : 8;
+        }
     }
 
     if (c->mode == OUT_C) {
@@ -813,7 +850,66 @@ static void compile_var(Compiler* c, ASTNode* n) {
 
 // === ASSIGNMENT ===
 static void compile_assign(Compiler* c, ASTNode* n) {
-    if (!n || !n->value || !n->left) return;
+    if (!n || !n->left) return;
+
+    // Complex LHS (array element, field access): stored in n->extra
+    if (n->extra) {
+        if (n->extra->type == ARRAY_ACCESS_NODE) {
+            // Array element assignment: arr[idx] = val
+            ASTNode* arr = n->extra->left;
+            ASTNode* idx = n->extra->right;
+
+            if (arr && arr->type == IDENTIFIER_NODE) {
+                int off = get_var_off(c, arr->value);
+                VivaType arr_type = get_var_type(c, arr->value);
+
+                // Determine element size (1 for octeto arrays, 8 otherwise)
+                int elem_size = 8;
+                int i = find_var(c, arr->value);
+                if (i >= 0 && arr_type == VIVA_TYPE_ARREGLO) {
+                    // Check if it's a byte array (size stored == number of elements for byte arrays)
+                    // For byte arrays, element size is 1
+                    elem_size = 1;  // Assume byte arrays for now
+                }
+
+                if (c->mode == OUT_C) {
+                    ind(c);
+                    compile_expr(c, arr);
+                    emit(c, "[");
+                    compile_expr(c, idx);
+                    emit(c, "] = ");
+                    compile_expr(c, n->left);
+                    emit(c, ";\n");
+                }
+                else if (c->mc) {
+                    // Compute address: base + index * elem_size
+                    compile_expr(c, idx);               // rax = index
+                    if (elem_size > 1) {
+                        encode_mov_rbx_imm32(c->mc, elem_size);
+                        encode_mul_rbx(c->mc);          // rax *= elem_size
+                    }
+                    encode_lea_rbx_rbp_off(c->mc, off); // rbx = &arr[0]
+                    encode_add_rax_rbx(c->mc);          // rax = &arr[index]
+                    encode_push_rax(c->mc);             // save address
+
+                    compile_expr(c, n->left);           // rax = value
+                    encode_pop_rbx(c->mc);              // rbx = address
+
+                    if (elem_size == 1) {
+                        encode_mov_rbx_ptr_from_al(c->mc);  // [rbx] = al
+                    } else {
+                        encode_mov_rbx_ptr_from_rax(c->mc); // [rbx] = rax
+                    }
+                }
+            }
+            return;
+        }
+        // TODO: Handle field access assignments (FIELD_ACCESS_NODE, ARROW_ACCESS_NODE)
+        return;
+    }
+
+    // Simple variable assignment
+    if (!n->value) return;
 
     if (c->mode == OUT_C) {
         ind(c);
@@ -834,6 +930,7 @@ static void compile_assign(Compiler* c, ASTNode* n) {
 }
 
 // === IF STATEMENT ===
+// Structure: left=condition, extra=then_body, params=else_body
 static void compile_if(Compiler* c, ASTNode* n) {
     static int lbl = 0;
     int id = lbl++;
@@ -841,13 +938,13 @@ static void compile_if(Compiler* c, ASTNode* n) {
     if (c->mode == OUT_C) {
         ind(c); emit(c, "if ("); compile_expr(c, n->left); emit(c, ") {\n");
         c->indent++;
-        compile_node(c, n->right);
+        compile_node(c, n->extra);  // then_body
         c->indent--;
         ind(c); emit(c, "}");
-        if (n->extra) {
+        if (n->params) {  // else_body
             emit(c, " else {\n");
             c->indent++;
-            compile_node(c, n->extra);
+            compile_node(c, n->params);
             c->indent--;
             ind(c); emit(c, "}");
         }
@@ -856,9 +953,9 @@ static void compile_if(Compiler* c, ASTNode* n) {
     else if (c->mode == OUT_ASM) {
         compile_expr(c, n->left);
         emit(c, "    cmp rax, 0\n    je .Lelse%d\n", id);
-        compile_node(c, n->right);
+        compile_node(c, n->extra);  // then_body
         emit(c, "    jmp .Lend%d\n.Lelse%d:\n", id, id);
-        if (n->extra) compile_node(c, n->extra);
+        if (n->params) compile_node(c, n->params);  // else_body
         emit(c, ".Lend%d:\n", id);
     }
     else if (c->mc) {
@@ -866,18 +963,19 @@ static void compile_if(Compiler* c, ASTNode* n) {
         encode_cmp_rax_zero(c->mc);
         int je_pos = get_current_offset(c->mc);
         encode_je_rel32(c->mc, 0);
-        compile_node(c, n->right);
+        compile_node(c, n->extra);  // then_body
         int jmp_pos = get_current_offset(c->mc);
         encode_jmp_rel32(c->mc, 0);
         int else_pos = get_current_offset(c->mc);
         patch_jump_offset(c->mc, je_pos + 2, else_pos);
-        if (n->extra) compile_node(c, n->extra);
+        if (n->params) compile_node(c, n->params);  // else_body
         int end_pos = get_current_offset(c->mc);
         patch_jump_offset(c->mc, jmp_pos + 1, end_pos);
     }
 }
 
 // === WHILE LOOP ===
+// Structure: left=condition, extra=body
 static void compile_while(Compiler* c, ASTNode* n) {
     static int lbl = 0;
     int id = lbl++;
@@ -885,7 +983,7 @@ static void compile_while(Compiler* c, ASTNode* n) {
     if (c->mode == OUT_C) {
         ind(c); emit(c, "while ("); compile_expr(c, n->left); emit(c, ") {\n");
         c->indent++;
-        compile_node(c, n->right);
+        compile_node(c, n->extra);  // body
         c->indent--;
         ind(c); emit(c, "}\n");
     }
@@ -893,7 +991,7 @@ static void compile_while(Compiler* c, ASTNode* n) {
         emit(c, ".Lw%d:\n", id);
         compile_expr(c, n->left);
         emit(c, "    cmp rax,0\n    je .Lwe%d\n", id);
-        compile_node(c, n->right);
+        compile_node(c, n->extra);  // body
         emit(c, "    jmp .Lw%d\n.Lwe%d:\n", id, id);
     }
     else if (c->mc) {
@@ -902,7 +1000,7 @@ static void compile_while(Compiler* c, ASTNode* n) {
         encode_cmp_rax_zero(c->mc);
         int je_pos = get_current_offset(c->mc);
         encode_je_rel32(c->mc, 0);
-        compile_node(c, n->right);
+        compile_node(c, n->extra);  // body
         int jmp_pos = get_current_offset(c->mc);
         encode_jmp_rel32(c->mc, 0);
         patch_jump_offset(c->mc, jmp_pos + 1, start);

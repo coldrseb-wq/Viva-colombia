@@ -120,6 +120,7 @@ TypeDesc* create_type_desc(VivaType base_type);
 TypeDesc* create_pointer_type(TypeDesc* element_type);
 TypeDesc* create_array_type(TypeDesc* element_type, int size);
 TypeDesc* create_struct_type(const char* name);
+TypeDesc* clone_type_desc(TypeDesc* td);
 
 // Parsing functions
 ASTNode* parse_expression(TokenStream* tokens, int* pos);
