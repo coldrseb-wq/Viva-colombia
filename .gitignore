@@ -22,6 +22,11 @@ variable_*
 direct_num_*
 final_*
 fn_*
+viva_lexer
+viva_parser
+bootstrap/viva_lexer
+bootstrap/viva_parser
+bootstrap/test_*
 
 # Build directories
 build/

@@ -1,0 +1,207 @@
+// Viva Compiler - Lexer (Bootstrap)
+// This lexer reads source code and produces tokens
+
+// Token types
+// 0 = EOF, 1 = IDENTIFIER, 2 = NUMBER, 3 = STRING
+// 4 = LPAREN, 5 = RPAREN, 6 = LBRACE, 7 = RBRACE
+// 8 = SEMICOLON, 9 = COLON, 10 = COMMA
+// 11 = PLUS, 12 = MINUS, 13 = MULTIPLY, 14 = DIVIDE
+// 15 = ASSIGN, 16 = EQUALITY, 17 = LESS, 18 = GREATER
+// 19 = KEYWORD_CANCION, 20 = KEYWORD_DECRETO, 21 = KEYWORD_SI
+// 22 = KEYWORD_SINO, 23 = KEYWORD_MIENTRAS, 24 = KEYWORD_RETORNO
+
+// Global source buffer
+decreto src: [4096]octeto;
+decreto src_len: entero = 0;
+decreto pos: entero = 0;
+
+// Current token
+decreto tok_type: entero = 0;
+decreto tok_buf: [256]octeto;
+decreto tok_len: entero = 0;
+
+// Helper: check if character is whitespace
+cancion es_espacio(c: entero): entero {
+    si (c == 32) { retorno 1; }  // space
+    si (c == 9) { retorno 1; }   // tab
+    si (c == 10) { retorno 1; }  // newline
+    si (c == 13) { retorno 1; }  // carriage return
+    retorno 0;
+}
+
+// Helper: check if character is digit
+cancion es_digito(c: entero): entero {
+    si (c >= 48) {
+        si (c <= 57) {
+            retorno 1;
+        }
+    }
+    retorno 0;
+}
+
+// Helper: check if character is letter or underscore
+cancion es_letra(c: entero): entero {
+    si (c >= 65) {
+        si (c <= 90) { retorno 1; }  // A-Z
+    }
+    si (c >= 97) {
+        si (c <= 122) { retorno 1; }  // a-z
+    }
+    si (c == 95) { retorno 1; }  // underscore
+    retorno 0;
+}
+
+// Skip whitespace
+cancion saltar_espacios() {
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (es_espacio(c) == 0) {
+            retorno;
+        }
+        pos = pos + 1;
+    }
+}
+
+// Read identifier or keyword
+cancion leer_identificador() {
+    tok_len = 0;
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (es_letra(c) == 1) {
+            tok_buf[tok_len] = c;
+            tok_len = tok_len + 1;
+            pos = pos + 1;
+        } sino {
+            si (es_digito(c) == 1) {
+                tok_buf[tok_len] = c;
+                tok_len = tok_len + 1;
+                pos = pos + 1;
+            } sino {
+                retorno;
+            }
+        }
+    }
+}
+
+// Read number
+cancion leer_numero() {
+    tok_len = 0;
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (es_digito(c) == 1) {
+            tok_buf[tok_len] = c;
+            tok_len = tok_len + 1;
+            pos = pos + 1;
+        } sino {
+            retorno;
+        }
+    }
+}
+
+// Get next token
+cancion siguiente_token() {
+    saltar_espacios();
+
+    si (pos >= src_len) {
+        tok_type = 0;  // EOF
+        retorno;
+    }
+
+    decreto c: entero = src[pos];
+
+    // Single char tokens
+    si (c == 40) { tok_type = 4; pos = pos + 1; retorno; }   // (
+    si (c == 41) { tok_type = 5; pos = pos + 1; retorno; }   // )
+    si (c == 123) { tok_type = 6; pos = pos + 1; retorno; }  // {
+    si (c == 125) { tok_type = 7; pos = pos + 1; retorno; }  // }
+    si (c == 59) { tok_type = 8; pos = pos + 1; retorno; }   // ;
+    si (c == 58) { tok_type = 9; pos = pos + 1; retorno; }   // :
+    si (c == 44) { tok_type = 10; pos = pos + 1; retorno; }  // ,
+    si (c == 43) { tok_type = 11; pos = pos + 1; retorno; }  // +
+    si (c == 45) { tok_type = 12; pos = pos + 1; retorno; }  // -
+    si (c == 42) { tok_type = 13; pos = pos + 1; retorno; }  // *
+    si (c == 47) { tok_type = 14; pos = pos + 1; retorno; }  // /
+    si (c == 60) { tok_type = 17; pos = pos + 1; retorno; }  // <
+    si (c == 62) { tok_type = 18; pos = pos + 1; retorno; }  // >
+
+    // = or ==
+    si (c == 61) {
+        pos = pos + 1;
+        si (pos < src_len) {
+            si (src[pos] == 61) {
+                tok_type = 16;  // ==
+                pos = pos + 1;
+                retorno;
+            }
+        }
+        tok_type = 15;  // =
+        retorno;
+    }
+
+    // Identifier or keyword
+    si (es_letra(c) == 1) {
+        leer_identificador();
+        tok_type = 1;  // IDENTIFIER by default
+        // TODO: Check for keywords
+        retorno;
+    }
+
+    // Number
+    si (es_digito(c) == 1) {
+        leer_numero();
+        tok_type = 2;  // NUMBER
+        retorno;
+    }
+
+    // Unknown - skip
+    pos = pos + 1;
+    siguiente_token();
+}
+
+// Main test
+cancion principal() {
+    // Test input
+    src[0] = 99;   // c
+    src[1] = 97;   // a
+    src[2] = 110;  // n
+    src[3] = 99;   // c
+    src[4] = 105;  // i
+    src[5] = 111;  // o
+    src[6] = 110;  // n
+    src[7] = 32;   // space
+    src[8] = 102;  // f
+    src[9] = 40;   // (
+    src[10] = 41;  // )
+    src[11] = 32;  // space
+    src[12] = 123; // {
+    src[13] = 125; // }
+    src_len = 14;
+
+    escribir_sys(1, "Tokenizing...\n", 14);
+
+    siguiente_token();
+    mientras (tok_type != 0) {
+        escribir_sys(1, "Token: ", 7);
+
+        si (tok_type == 1) {
+            escribir_sys(1, "ID\n", 3);
+        }
+        si (tok_type == 4) {
+            escribir_sys(1, "LPAREN\n", 7);
+        }
+        si (tok_type == 5) {
+            escribir_sys(1, "RPAREN\n", 7);
+        }
+        si (tok_type == 6) {
+            escribir_sys(1, "LBRACE\n", 7);
+        }
+        si (tok_type == 7) {
+            escribir_sys(1, "RBRACE\n", 7);
+        }
+
+        siguiente_token();
+    }
+
+    escribir_sys(1, "Done!\n", 6);
+    salir_sys(0);
+}

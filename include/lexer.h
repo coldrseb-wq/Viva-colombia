@@ -5,41 +5,98 @@
 #define INITIAL_TOKEN_CAPACITY 16
 
 typedef enum {
+    // Basic tokens
     IDENTIFIER,
     NUMBER,
+    HEX_NUMBER,         // 0x... hexadecimal literals
     STRING,
+
+    // Arithmetic operators
     PLUS,
     MINUS,
     MULTIPLY,
     DIVIDE,
-    ASSIGN,         // For = in variable assignment
-    EQUALITY,       // For == operator
-    NOT_EQUAL,      // For != operator
-    LESS_THAN,      // For < operator
-    GREATER_THAN,   // For > operator
+    MODULO,             // %
+
+    // Assignment and comparison
+    ASSIGN,             // =
+    EQUALITY,           // ==
+    NOT_EQUAL,          // !=
+    LESS_THAN,          // <
+    GREATER_THAN,       // >
+    LESS_EQUAL,         // <=
+    GREATER_EQUAL,      // >=
+
+    // Bitwise operators (critical for bootstrap)
+    BIT_AND,            // &
+    BIT_OR,             // |
+    BIT_XOR,            // ^
+    BIT_NOT,            // ~
+    BIT_LSHIFT,         // <<
+    BIT_RSHIFT,         // >>
+
+    // Logical operators
+    Y,                  // && (Spanish "y" = and)
+    O,                  // || (Spanish "o" = or)
+    NO,                 // !  (Spanish "no" = not)
+
+    // Delimiters
     LPAREN,
     RPAREN,
     LBRACE,
     RBRACE,
+    LBRACKET,
+    RBRACKET,
     SEMICOLON,
     COMMA,
+    DOT,                // . for struct field access
+    ARROW,              // -> for pointer field access
+    COLON,              // : for type annotations
+    AMPERSAND,          // & for address-of
+    ASTERISK,           // * for dereference (context-dependent with MULTIPLY)
+
+    // Keywords - Variable declaration
     LET,
-    DECRETO,        // Spanish for "decree" - Colombian historical reference
+    DECRETO,            // Spanish "decreto" = decree/let
+
+    // Keywords - Functions
     FN,
-    CANCION,        // Spanish for "song" - cultural reference
-    SI,             // Spanish for "if"
-    SINO,           // Spanish for "else"
-    MIENTRAS,       // Spanish for "while"
-    PARA,           // Spanish for "for"
-    HASTA,          // Spanish for "until"
-    RETORNO,        // Spanish for "return"
-    ROMPER,         // Spanish for "break"
-    CONTINUAR,      // Spanish for "continue"
-    Y,              // Spanish for "and" (&&)
-    O,              // Spanish for "or" (||)
-    NO,             // Spanish for "not" (!)
-    LBRACKET,       // Left bracket [
-    RBRACKET,       // Right bracket ]
+    CANCION,            // Spanish "cancion" = song/function
+    RETORNO,            // Spanish "retorno" = return
+
+    // Keywords - Control flow
+    SI,                 // Spanish "si" = if
+    SINO,               // Spanish "sino" = else
+    MIENTRAS,           // Spanish "mientras" = while
+    PARA,               // Spanish "para" = for
+    HASTA,              // Spanish "hasta" = until
+    ROMPER,             // Spanish "romper" = break
+    CONTINUAR,          // Spanish "continuar" = continue
+
+    // Keywords - Types (critical for bootstrap)
+    TIPO_ENTERO,        // "entero" = int
+    TIPO_OCTETO,        // "octeto" = byte/u8
+    TIPO_CADENA,        // "cadena" = string
+    TIPO_VACIO,         // "vacio" = void
+    TIPO_BOOL,          // "booleano" = bool
+
+    // Keywords - Structures (critical for bootstrap)
+    ESTRUCTURA,         // Spanish "estructura" = struct
+    TAMANO,             // Spanish "tamano" = sizeof
+
+    // Keywords - Memory/Pointers
+    NULO,               // Spanish "nulo" = null
+    NUEVO,              // Spanish "nuevo" = new (allocation)
+    LIBERAR,            // Spanish "liberar" = free
+
+    // Keywords - Syscalls (for pure machine code, no libc)
+    ESCRIBIR_SYS,       // sys_write
+    LEER_SYS,           // sys_read
+    ABRIR_SYS,          // sys_open
+    CERRAR_SYS,         // sys_close
+    SALIR_SYS,          // sys_exit
+
+    // Special
     UNKNOWN
 } TokenType;
 

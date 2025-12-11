@@ -1,0 +1,661 @@
+// Viva Compiler - Parser (Bootstrap)
+// Builds AST from tokens produced by lexer
+
+// Token types (from lexer)
+// 0 = EOF, 1 = IDENTIFIER, 2 = NUMBER, 3 = STRING
+// 4 = LPAREN, 5 = RPAREN, 6 = LBRACE, 7 = RBRACE
+// 8 = SEMICOLON, 9 = COLON, 10 = COMMA
+// 11 = PLUS, 12 = MINUS, 13 = MULTIPLY, 14 = DIVIDE
+// 15 = ASSIGN, 16 = EQUALITY, 17 = LESS, 18 = GREATER
+// 19 = LBRACKET, 20 = RBRACKET
+
+// AST Node types
+// 0 = PROGRAM, 1 = FUNC_DECL, 2 = VAR_DECL, 3 = BLOCK
+// 4 = IF_STMT, 5 = WHILE_STMT, 6 = RETURN_STMT, 7 = EXPR_STMT
+// 8 = ASSIGN_EXPR, 9 = BINARY_OP, 10 = IDENTIFIER, 11 = NUMBER
+// 12 = CALL_EXPR, 13 = ARRAY_ACCESS
+
+// === LEXER (embedded) ===
+decreto src: [8192]octeto;
+decreto src_len: entero = 0;
+decreto pos: entero = 0;
+decreto tok_type: entero = 0;
+decreto tok_buf: [256]octeto;
+decreto tok_len: entero = 0;
+
+cancion es_espacio(c: entero): entero {
+    si (c == 32) { retorno 1; }
+    si (c == 9) { retorno 1; }
+    si (c == 10) { retorno 1; }
+    si (c == 13) { retorno 1; }
+    retorno 0;
+}
+
+cancion es_digito(c: entero): entero {
+    si (c >= 48) {
+        si (c <= 57) {
+            retorno 1;
+        }
+    }
+    retorno 0;
+}
+
+cancion es_letra(c: entero): entero {
+    si (c >= 65) {
+        si (c <= 90) { retorno 1; }
+    }
+    si (c >= 97) {
+        si (c <= 122) { retorno 1; }
+    }
+    si (c == 95) { retorno 1; }
+    retorno 0;
+}
+
+cancion saltar_espacios() {
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        // Skip comments
+        si (c == 47) {
+            si (pos + 1 < src_len) {
+                si (src[pos + 1] == 47) {
+                    // Single-line comment
+                    pos = pos + 2;
+                    mientras (pos < src_len) {
+                        si (src[pos] == 10) {
+                            pos = pos + 1;
+                            retorno;
+                        }
+                        pos = pos + 1;
+                    }
+                    retorno;
+                }
+            }
+        }
+        si (es_espacio(c) == 0) {
+            retorno;
+        }
+        pos = pos + 1;
+    }
+}
+
+cancion leer_identificador() {
+    tok_len = 0;
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (es_letra(c) == 1) {
+            tok_buf[tok_len] = c;
+            tok_len = tok_len + 1;
+            pos = pos + 1;
+        } sino {
+            si (es_digito(c) == 1) {
+                tok_buf[tok_len] = c;
+                tok_len = tok_len + 1;
+                pos = pos + 1;
+            } sino {
+                tok_buf[tok_len] = 0;
+                retorno;
+            }
+        }
+    }
+    tok_buf[tok_len] = 0;
+}
+
+cancion leer_numero() {
+    tok_len = 0;
+    mientras (pos < src_len) {
+        decreto c: entero = src[pos];
+        si (es_digito(c) == 1) {
+            tok_buf[tok_len] = c;
+            tok_len = tok_len + 1;
+            pos = pos + 1;
+        } sino {
+            tok_buf[tok_len] = 0;
+            retorno;
+        }
+    }
+    tok_buf[tok_len] = 0;
+}
+
+cancion siguiente_token() {
+    saltar_espacios();
+
+    si (pos >= src_len) {
+        tok_type = 0;
+        retorno;
+    }
+
+    decreto c: entero = src[pos];
+
+    si (c == 40) { tok_type = 4; pos = pos + 1; retorno; }
+    si (c == 41) { tok_type = 5; pos = pos + 1; retorno; }
+    si (c == 123) { tok_type = 6; pos = pos + 1; retorno; }
+    si (c == 125) { tok_type = 7; pos = pos + 1; retorno; }
+    si (c == 59) { tok_type = 8; pos = pos + 1; retorno; }
+    si (c == 58) { tok_type = 9; pos = pos + 1; retorno; }
+    si (c == 44) { tok_type = 10; pos = pos + 1; retorno; }
+    si (c == 43) { tok_type = 11; pos = pos + 1; retorno; }
+    si (c == 45) { tok_type = 12; pos = pos + 1; retorno; }
+    si (c == 42) { tok_type = 13; pos = pos + 1; retorno; }
+    si (c == 47) { tok_type = 14; pos = pos + 1; retorno; }
+    si (c == 60) { tok_type = 17; pos = pos + 1; retorno; }
+    si (c == 62) { tok_type = 18; pos = pos + 1; retorno; }
+    si (c == 91) { tok_type = 19; pos = pos + 1; retorno; }
+    si (c == 93) { tok_type = 20; pos = pos + 1; retorno; }
+
+    si (c == 61) {
+        pos = pos + 1;
+        si (pos < src_len) {
+            si (src[pos] == 61) {
+                tok_type = 16;
+                pos = pos + 1;
+                retorno;
+            }
+        }
+        tok_type = 15;
+        retorno;
+    }
+
+    si (es_letra(c) == 1) {
+        leer_identificador();
+        tok_type = 1;
+        retorno;
+    }
+
+    si (es_digito(c) == 1) {
+        leer_numero();
+        tok_type = 2;
+        retorno;
+    }
+
+    pos = pos + 1;
+    siguiente_token();
+}
+
+// === AST Storage ===
+// Simple node storage using arrays
+// Each node: [type, value_idx, left_idx, right_idx, extra_idx]
+decreto ast_nodes: [5000]entero;   // Node data (5 ints per node)
+decreto ast_count: entero = 0;
+
+// String storage for identifiers/values
+decreto str_pool: [4096]octeto;
+decreto str_pos: entero = 0;
+
+cancion store_string(): entero {
+    decreto start: entero = str_pos;
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        str_pool[str_pos] = tok_buf[i];
+        str_pos = str_pos + 1;
+        i = i + 1;
+    }
+    str_pool[str_pos] = 0;
+    str_pos = str_pos + 1;
+    retorno start;
+}
+
+cancion new_node(tipo: entero): entero {
+    decreto idx: entero = ast_count * 5;
+    ast_nodes[idx] = tipo;
+    ast_nodes[idx + 1] = 0;  // value_idx
+    ast_nodes[idx + 2] = 0;  // left
+    ast_nodes[idx + 3] = 0;  // right
+    ast_nodes[idx + 4] = 0;  // extra
+    ast_count = ast_count + 1;
+    retorno ast_count - 1;
+}
+
+cancion set_node_value(n: entero, val: entero) {
+    decreto idx: entero = n * 5;
+    ast_nodes[idx + 1] = val;
+}
+
+cancion set_node_left(n: entero, left: entero) {
+    decreto idx: entero = n * 5;
+    ast_nodes[idx + 2] = left;
+}
+
+cancion set_node_right(n: entero, right: entero) {
+    decreto idx: entero = n * 5;
+    ast_nodes[idx + 3] = right;
+}
+
+cancion get_node_type(n: entero): entero {
+    decreto idx: entero = n * 5;
+    retorno ast_nodes[idx];
+}
+
+cancion get_node_value(n: entero): entero {
+    decreto idx: entero = n * 5;
+    retorno ast_nodes[idx + 1];
+}
+
+// === Helper: String comparison ===
+cancion strcmp_tok(s: entero): entero {
+    // Compare tok_buf with string at str_pool[s]
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        si (str_pool[s + i] != tok_buf[i]) {
+            retorno 0;
+        }
+        i = i + 1;
+    }
+    si (str_pool[s + i] == 0) {
+        retorno 1;
+    }
+    retorno 0;
+}
+
+cancion is_keyword_cancion(): entero {
+    // "cancion"
+    si (tok_len != 7) { retorno 0; }
+    si (tok_buf[0] != 99) { retorno 0; }   // c
+    si (tok_buf[1] != 97) { retorno 0; }   // a
+    si (tok_buf[2] != 110) { retorno 0; }  // n
+    si (tok_buf[3] != 99) { retorno 0; }   // c
+    si (tok_buf[4] != 105) { retorno 0; }  // i
+    si (tok_buf[5] != 111) { retorno 0; }  // o
+    si (tok_buf[6] != 110) { retorno 0; }  // n
+    retorno 1;
+}
+
+cancion is_keyword_decreto(): entero {
+    // "decreto"
+    si (tok_len != 7) { retorno 0; }
+    si (tok_buf[0] != 100) { retorno 0; }  // d
+    si (tok_buf[1] != 101) { retorno 0; }  // e
+    si (tok_buf[2] != 99) { retorno 0; }   // c
+    si (tok_buf[3] != 114) { retorno 0; }  // r
+    si (tok_buf[4] != 101) { retorno 0; }  // e
+    si (tok_buf[5] != 116) { retorno 0; }  // t
+    si (tok_buf[6] != 111) { retorno 0; }  // o
+    retorno 1;
+}
+
+cancion is_keyword_si(): entero {
+    si (tok_len != 2) { retorno 0; }
+    si (tok_buf[0] != 115) { retorno 0; }  // s
+    si (tok_buf[1] != 105) { retorno 0; }  // i
+    retorno 1;
+}
+
+cancion is_keyword_sino(): entero {
+    si (tok_len != 4) { retorno 0; }
+    si (tok_buf[0] != 115) { retorno 0; }  // s
+    si (tok_buf[1] != 105) { retorno 0; }  // i
+    si (tok_buf[2] != 110) { retorno 0; }  // n
+    si (tok_buf[3] != 111) { retorno 0; }  // o
+    retorno 1;
+}
+
+cancion is_keyword_mientras(): entero {
+    si (tok_len != 8) { retorno 0; }
+    si (tok_buf[0] != 109) { retorno 0; }  // m
+    si (tok_buf[1] != 105) { retorno 0; }  // i
+    si (tok_buf[2] != 101) { retorno 0; }  // e
+    si (tok_buf[3] != 110) { retorno 0; }  // n
+    si (tok_buf[4] != 116) { retorno 0; }  // t
+    si (tok_buf[5] != 114) { retorno 0; }  // r
+    si (tok_buf[6] != 97) { retorno 0; }   // a
+    si (tok_buf[7] != 115) { retorno 0; }  // s
+    retorno 1;
+}
+
+cancion is_keyword_retorno(): entero {
+    si (tok_len != 7) { retorno 0; }
+    si (tok_buf[0] != 114) { retorno 0; }  // r
+    si (tok_buf[1] != 101) { retorno 0; }  // e
+    si (tok_buf[2] != 116) { retorno 0; }  // t
+    si (tok_buf[3] != 111) { retorno 0; }  // o
+    si (tok_buf[4] != 114) { retorno 0; }  // r
+    si (tok_buf[5] != 110) { retorno 0; }  // n
+    si (tok_buf[6] != 111) { retorno 0; }  // o
+    retorno 1;
+}
+
+// === PARSER ===
+cancion parse_primary(): entero {
+    si (tok_type == 2) {
+        // Number
+        decreto n: entero = new_node(11);
+        decreto val: entero = store_string();
+        set_node_value(n, val);
+        siguiente_token();
+        retorno n;
+    }
+    si (tok_type == 1) {
+        // Identifier
+        decreto n: entero = new_node(10);
+        decreto val: entero = store_string();
+        set_node_value(n, val);
+        siguiente_token();
+
+        // Check for function call or array access
+        si (tok_type == 4) {
+            // Function call: name(args)
+            siguiente_token();  // skip (
+            // TODO: parse arguments
+            si (tok_type == 5) {
+                siguiente_token();  // skip )
+            }
+            decreto call: entero = new_node(12);
+            set_node_left(call, n);
+            retorno call;
+        }
+        si (tok_type == 19) {
+            // Array access: name[index]
+            siguiente_token();  // skip [
+            decreto idx: entero = parse_primary();
+            si (tok_type == 20) {
+                siguiente_token();  // skip ]
+            }
+            decreto access: entero = new_node(13);
+            set_node_left(access, n);
+            set_node_right(access, idx);
+            retorno access;
+        }
+        retorno n;
+    }
+    si (tok_type == 4) {
+        // Parenthesized expression
+        siguiente_token();  // skip (
+        decreto n: entero = parse_primary();
+        si (tok_type == 5) {
+            siguiente_token();  // skip )
+        }
+        retorno n;
+    }
+    retorno 0;
+}
+
+cancion parse_expr(): entero {
+    decreto left: entero = parse_primary();
+
+    // Check for binary operators
+    si (tok_type == 11) {
+        // +
+        siguiente_token();
+        decreto right: entero = parse_primary();
+        decreto n: entero = new_node(9);
+        set_node_value(n, 11);  // PLUS
+        set_node_left(n, left);
+        set_node_right(n, right);
+        retorno n;
+    }
+    si (tok_type == 12) {
+        // -
+        siguiente_token();
+        decreto right: entero = parse_primary();
+        decreto n: entero = new_node(9);
+        set_node_value(n, 12);  // MINUS
+        set_node_left(n, left);
+        set_node_right(n, right);
+        retorno n;
+    }
+    si (tok_type == 16) {
+        // ==
+        siguiente_token();
+        decreto right: entero = parse_primary();
+        decreto n: entero = new_node(9);
+        set_node_value(n, 16);  // EQUALITY
+        set_node_left(n, left);
+        set_node_right(n, right);
+        retorno n;
+    }
+    si (tok_type == 17) {
+        // <
+        siguiente_token();
+        decreto right: entero = parse_primary();
+        decreto n: entero = new_node(9);
+        set_node_value(n, 17);  // LESS
+        set_node_left(n, left);
+        set_node_right(n, right);
+        retorno n;
+    }
+    si (tok_type == 18) {
+        // >
+        siguiente_token();
+        decreto right: entero = parse_primary();
+        decreto n: entero = new_node(9);
+        set_node_value(n, 18);  // GREATER
+        set_node_left(n, left);
+        set_node_right(n, right);
+        retorno n;
+    }
+    si (tok_type == 15) {
+        // =
+        siguiente_token();
+        decreto right: entero = parse_expr();
+        decreto n: entero = new_node(8);  // ASSIGN
+        set_node_left(n, left);
+        set_node_right(n, right);
+        retorno n;
+    }
+
+    retorno left;
+}
+
+cancion parse_statement(): entero {
+    // Variable declaration
+    si (tok_type == 1) {
+        si (is_keyword_decreto() == 1) {
+            siguiente_token();  // skip 'decreto'
+            decreto n: entero = new_node(2);  // VAR_DECL
+            decreto name: entero = store_string();
+            set_node_value(n, name);
+            siguiente_token();  // skip var name
+            si (tok_type == 9) {
+                siguiente_token();  // skip :
+            }
+            // TODO: parse type
+            si (tok_type == 1) {
+                siguiente_token();  // skip type
+            }
+            si (tok_type == 15) {
+                siguiente_token();  // skip =
+                decreto init: entero = parse_expr();
+                set_node_left(n, init);
+            }
+            si (tok_type == 8) {
+                siguiente_token();  // skip ;
+            }
+            retorno n;
+        }
+
+        si (is_keyword_si() == 1) {
+            siguiente_token();  // skip 'si'
+            si (tok_type == 4) {
+                siguiente_token();  // skip (
+            }
+            decreto cond: entero = parse_expr();
+            si (tok_type == 5) {
+                siguiente_token();  // skip )
+            }
+            si (tok_type == 6) {
+                siguiente_token();  // skip {
+            }
+            // Parse body statements
+            decreto body: entero = 0;
+            mientras (tok_type != 7) {
+                decreto stmt: entero = parse_statement();
+                si (body == 0) {
+                    body = stmt;
+                }
+                si (tok_type == 0) {
+                    retorno 0;
+                }
+            }
+            siguiente_token();  // skip }
+
+            decreto n: entero = new_node(4);  // IF_STMT
+            set_node_left(n, cond);
+            set_node_right(n, body);
+            retorno n;
+        }
+
+        si (is_keyword_mientras() == 1) {
+            siguiente_token();  // skip 'mientras'
+            si (tok_type == 4) {
+                siguiente_token();  // skip (
+            }
+            decreto cond: entero = parse_expr();
+            si (tok_type == 5) {
+                siguiente_token();  // skip )
+            }
+            si (tok_type == 6) {
+                siguiente_token();  // skip {
+            }
+            mientras (tok_type != 7) {
+                parse_statement();
+                si (tok_type == 0) {
+                    retorno 0;
+                }
+            }
+            siguiente_token();  // skip }
+
+            decreto n: entero = new_node(5);  // WHILE_STMT
+            set_node_left(n, cond);
+            retorno n;
+        }
+
+        si (is_keyword_retorno() == 1) {
+            siguiente_token();  // skip 'retorno'
+            decreto n: entero = new_node(6);  // RETURN_STMT
+            si (tok_type != 8) {
+                decreto val: entero = parse_expr();
+                set_node_left(n, val);
+            }
+            si (tok_type == 8) {
+                siguiente_token();  // skip ;
+            }
+            retorno n;
+        }
+
+        // Expression statement (assignment, function call, etc.)
+        decreto expr: entero = parse_expr();
+        si (tok_type == 8) {
+            siguiente_token();  // skip ;
+        }
+        decreto n: entero = new_node(7);  // EXPR_STMT
+        set_node_left(n, expr);
+        retorno n;
+    }
+
+    // Skip unknown tokens
+    siguiente_token();
+    retorno 0;
+}
+
+cancion parse_function(): entero {
+    si (is_keyword_cancion() == 1) {
+        siguiente_token();  // skip 'cancion'
+        decreto n: entero = new_node(1);  // FUNC_DECL
+        decreto name: entero = store_string();
+        set_node_value(n, name);
+        siguiente_token();  // skip function name
+
+        si (tok_type == 4) {
+            siguiente_token();  // skip (
+        }
+        // TODO: parse parameters
+        mientras (tok_type != 5) {
+            siguiente_token();
+        }
+        si (tok_type == 5) {
+            siguiente_token();  // skip )
+        }
+
+        // Skip return type if present
+        si (tok_type == 9) {
+            siguiente_token();  // skip :
+            si (tok_type == 1) {
+                siguiente_token();  // skip type
+            }
+        }
+
+        si (tok_type == 6) {
+            siguiente_token();  // skip {
+        }
+
+        // Parse body
+        mientras (tok_type != 7) {
+            parse_statement();
+            si (tok_type == 0) {
+                retorno n;
+            }
+        }
+        siguiente_token();  // skip }
+        retorno n;
+    }
+    retorno 0;
+}
+
+cancion parse_program(): entero {
+    decreto prog: entero = new_node(0);  // PROGRAM
+    siguiente_token();  // Get first token
+
+    mientras (tok_type != 0) {
+        si (tok_type == 1) {
+            si (is_keyword_cancion() == 1) {
+                parse_function();
+            } sino {
+                si (is_keyword_decreto() == 1) {
+                    parse_statement();
+                } sino {
+                    siguiente_token();
+                }
+            }
+        } sino {
+            siguiente_token();
+        }
+    }
+
+    retorno prog;
+}
+
+// === Main ===
+cancion principal() {
+    // Test input: simple function
+    src[0] = 99;   // c
+    src[1] = 97;   // a
+    src[2] = 110;  // n
+    src[3] = 99;   // c
+    src[4] = 105;  // i
+    src[5] = 111;  // o
+    src[6] = 110;  // n
+    src[7] = 32;   // space
+    src[8] = 102;  // f
+    src[9] = 40;   // (
+    src[10] = 41;  // )
+    src[11] = 32;  // space
+    src[12] = 123; // {
+    src[13] = 32;  // space
+    src[14] = 114; // r
+    src[15] = 101; // e
+    src[16] = 116; // t
+    src[17] = 111; // o
+    src[18] = 114; // r
+    src[19] = 110; // n
+    src[20] = 111; // o
+    src[21] = 32;  // space
+    src[22] = 49;  // 1
+    src[23] = 59;  // ;
+    src[24] = 32;  // space
+    src[25] = 125; // }
+    src_len = 26;
+
+    escribir_sys(1, "Parsing...\n", 11);
+
+    decreto prog: entero = parse_program();
+
+    escribir_sys(1, "AST nodes: ", 11);
+
+    si (ast_count > 0) {
+        escribir_sys(1, "ok\n", 3);
+    } sino {
+        escribir_sys(1, "none\n", 5);
+    }
+
+    escribir_sys(1, "Done!\n", 6);
+    salir_sys(0);
+}

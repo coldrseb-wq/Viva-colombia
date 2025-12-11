@@ -1,0 +1,26 @@
+// Test 1: Basic features needed for bootstrap
+// Arrays, byte access, loops, conditionals
+
+cancion principal() {
+    // Test 1: Simple byte array
+    decreto buf: [16]octeto;
+
+    // Test 2: Write bytes to array
+    buf[0] = 72;   // 'H'
+    buf[1] = 105;  // 'i'
+    buf[2] = 10;   // newline
+
+    // Test 3: Write to stdout
+    escribir_sys(1, buf, 3);
+
+    // Test 4: Loop and conditionals
+    decreto i: entero = 0;
+    mientras (i < 3) {
+        si (buf[i] == 72) {
+            escribir_sys(1, "Found H!\n", 9);
+        }
+        i = i + 1;
+    }
+
+    salir_sys(0);
+}

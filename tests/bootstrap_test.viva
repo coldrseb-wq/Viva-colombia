@@ -1,0 +1,12 @@
+// Test bootstrap features - raw syscalls without libc
+// Viva Colombia - Colombian Spanish syntax
+
+// Test writing directly to stdout using syscall
+cancion principal() {
+    // Test escribir_sys (sys_write) to stdout (fd=1)
+    decreto mensaje: cadena = "Hola desde Viva Colombia!\n";
+    escribir_sys(1, mensaje, 27);
+
+    // Exit with success using salir_sys
+    salir_sys(0);
+}

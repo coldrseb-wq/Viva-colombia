@@ -1,0 +1,5 @@
+// Test raw write syscall - using immediate values
+cancion principal() {
+    // Just exit with 42 to verify code runs
+    salir_sys(42);
+}

@@ -1,0 +1,5 @@
+// Test 0: Absolute minimum
+cancion principal() {
+    escribir_sys(1, "OK\n", 3);
+    salir_sys(0);
+}
