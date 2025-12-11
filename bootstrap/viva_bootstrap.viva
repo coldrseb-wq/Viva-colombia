@@ -1125,10 +1125,9 @@ cancion glob_find(): entero {
 }
 
 cancion glob_is_array(): entero {
-    // Check if last found global (via g_glob_idx) is an array (size > 8)
+    // Check if last found global (via g_glob_idx) is an array
     si (g_glob_idx >= glob_cnt) { retorno 0; }  // Bounds check
-    si (glob_sizes[g_glob_idx] > 8) { retorno 1; }
-    retorno 0;
+    retorno glob_is_arr[g_glob_idx];
 }
 
 // Compile a primary expression (number, variable, function call, or parenthesized)
@@ -1898,6 +1897,7 @@ cancion compile_function() {
 decreto glob_names: [2048]octeto;
 decreto glob_offs: [64]entero;
 decreto glob_sizes: [64]entero;
+decreto glob_is_arr: [64]entero;  // 1 if array, 0 if scalar
 decreto glob_cnt: entero = 0;
 decreto glob_np: entero = 0;
 decreto glob_data_pos: entero = 0;
@@ -1970,6 +1970,7 @@ cancion compile_global_var() {
     // Register the global variable
     glob_offs[glob_cnt] = glob_data_pos;
     glob_sizes[glob_cnt] = var_size;
+    glob_is_arr[glob_cnt] = is_array;  // Track if it's an array
     glob_cnt = glob_cnt + 1;
     glob_data_pos = glob_data_pos + var_size;
 
@@ -2011,25 +2012,30 @@ cancion compile_program() {
 // ELF GENERATION
 // ============================================================
 
-decreto elf_buf: [131072]octeto;
-decreto elf_pos: entero = 0;
+// Streaming output - write directly to stdout for self-hosting support
+// This avoids the chicken-and-egg problem where output contains the output buffer
+decreto elf_out: [8]octeto;  // Small buffer for streaming output
+decreto elf_pos: entero = 0;  // Track position for seeking back if needed
 
 cancion elf_byte(b: entero) {
-    elf_buf[elf_pos] = b;
+    elf_out[0] = b;
+    escribir_sys(1, elf_out, 1);
     elf_pos = elf_pos + 1;
 }
 
 cancion elf_word(w: entero) {
-    elf_buf[elf_pos] = w;
-    elf_buf[elf_pos + 1] = w / 256;
+    elf_out[0] = w;
+    elf_out[1] = w / 256;
+    escribir_sys(1, elf_out, 2);
     elf_pos = elf_pos + 2;
 }
 
 cancion elf_dword(d: entero) {
-    elf_buf[elf_pos] = d;
-    elf_buf[elf_pos + 1] = d / 256;
-    elf_buf[elf_pos + 2] = d / 65536;
-    elf_buf[elf_pos + 3] = d / 16777216;
+    elf_out[0] = d;
+    elf_out[1] = d / 256;
+    elf_out[2] = d / 65536;
+    elf_out[3] = d / 16777216;
+    escribir_sys(1, elf_out, 4);
     elf_pos = elf_pos + 4;
 }
 
@@ -2132,9 +2138,8 @@ cancion principal() {
 
     gen_elf();
 
-    escribir_sys(2, "Writing output...\n", 18);
+    escribir_sys(2, "Done.\n", 6);
 
-    escribir_sys(1, elf_buf, elf_pos);
-
+    // Output already written directly to stdout via streaming
     salir_sys(0);
 }
