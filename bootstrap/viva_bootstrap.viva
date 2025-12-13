@@ -490,21 +490,30 @@ cancion resolve_patches() {
                     decreto target: entero = fn_addrs[fn_idx];
                     decreto addr: entero = patch_addrs[p];
                     decreto rel: entero = target - addr - 4;
-                    // Patch the 4-byte offset at addr
-                    code[addr] = rel;
-                    si (rel < 0) {
-                        // Handle negative offsets (two's complement)
-                        decreto u: entero = rel + 4294967296;
-                        code[addr] = u;
-                        code[addr + 1] = u / 256;
-                        code[addr + 2] = u / 65536;
-                        code[addr + 3] = u / 16777216;
-                    } sino {
-                        code[addr] = rel;
-                        code[addr + 1] = rel / 256;
-                        code[addr + 2] = rel / 65536;
-                        code[addr + 3] = rel / 16777216;
-                    }
+                    // Patch the 4-byte offset at addr using borrow-based algorithm
+                    decreto pval: entero = rel;
+                    decreto pq0: entero = pval / 256;
+                    decreto pb0: entero = pval - pq0 * 256;
+                    si (pb0 < 0) { pb0 = pb0 + 256; pq0 = pq0 - 1; }
+                    code[addr] = pb0;
+
+                    pval = pq0;
+                    decreto pq1: entero = pval / 256;
+                    decreto pb1: entero = pval - pq1 * 256;
+                    si (pb1 < 0) { pb1 = pb1 + 256; pq1 = pq1 - 1; }
+                    code[addr + 1] = pb1;
+
+                    pval = pq1;
+                    decreto pq2: entero = pval / 256;
+                    decreto pb2: entero = pval - pq2 * 256;
+                    si (pb2 < 0) { pb2 = pb2 + 256; pq2 = pq2 - 1; }
+                    code[addr + 2] = pb2;
+
+                    pval = pq2;
+                    decreto pq3: entero = pval / 256;
+                    decreto pb3: entero = pval - pq3 * 256;
+                    si (pb3 < 0) { pb3 = pb3 + 256; }
+                    code[addr + 3] = pb3;
                     found = 1;
                 }
             }
@@ -702,16 +711,46 @@ cancion emit_byte(b: entero) {
 }
 
 cancion emit_dword(d: entero) {
-    // Handle negative numbers for two's complement
-    decreto u: entero = d;
-    si (d < 0) {
-        u = d + 4294967296;
+    // Use borrow-based algorithm for proper two's complement
+    decreto val: entero = d;
+
+    // Extract byte 0
+    decreto q0: entero = val / 256;
+    decreto b0: entero = val - q0 * 256;
+    si (b0 < 0) {
+        b0 = b0 + 256;
+        q0 = q0 - 1;
     }
-    code[code_pos] = u;
-    code[code_pos + 1] = u / 256;
-    code[code_pos + 2] = u / 65536;
-    code[code_pos + 3] = u / 16777216;
-    code_pos = code_pos + 4;
+    emit_byte(b0);
+
+    // Extract byte 1
+    val = q0;
+    decreto q1: entero = val / 256;
+    decreto b1: entero = val - q1 * 256;
+    si (b1 < 0) {
+        b1 = b1 + 256;
+        q1 = q1 - 1;
+    }
+    emit_byte(b1);
+
+    // Extract byte 2
+    val = q1;
+    decreto q2: entero = val / 256;
+    decreto b2: entero = val - q2 * 256;
+    si (b2 < 0) {
+        b2 = b2 + 256;
+        q2 = q2 - 1;
+    }
+    emit_byte(b2);
+
+    // Extract byte 3
+    val = q2;
+    decreto q3: entero = val / 256;
+    decreto b3: entero = val - q3 * 256;
+    si (b3 < 0) {
+        b3 = b3 + 256;
+    }
+    emit_byte(b3);
 }
 
 cancion emit_qword(q: entero) {
@@ -951,15 +990,30 @@ cancion emit_jmp(): entero {
 // Patch a jump target at addr to point to current code_pos
 cancion emit_patch(addr: entero) {
     decreto rel: entero = code_pos - addr - 4;
-    // Handle negative offsets for backward jumps
-    decreto u: entero = rel;
-    si (rel < 0) {
-        u = rel + 4294967296;
-    }
-    code[addr] = u;
-    code[addr + 1] = u / 256;
-    code[addr + 2] = u / 65536;
-    code[addr + 3] = u / 16777216;
+    // Use borrow-based algorithm for proper two's complement
+    decreto pval: entero = rel;
+    decreto pq0: entero = pval / 256;
+    decreto pb0: entero = pval - pq0 * 256;
+    si (pb0 < 0) { pb0 = pb0 + 256; pq0 = pq0 - 1; }
+    code[addr] = pb0;
+
+    pval = pq0;
+    decreto pq1: entero = pval / 256;
+    decreto pb1: entero = pval - pq1 * 256;
+    si (pb1 < 0) { pb1 = pb1 + 256; pq1 = pq1 - 1; }
+    code[addr + 1] = pb1;
+
+    pval = pq1;
+    decreto pq2: entero = pval / 256;
+    decreto pb2: entero = pval - pq2 * 256;
+    si (pb2 < 0) { pb2 = pb2 + 256; pq2 = pq2 - 1; }
+    code[addr + 2] = pb2;
+
+    pval = pq2;
+    decreto pq3: entero = pval / 256;
+    decreto pb3: entero = pval - pq3 * 256;
+    si (pb3 < 0) { pb3 = pb3 + 256; }
+    code[addr + 3] = pb3;
 }
 
 // setle al; movzx rax, al
@@ -1324,7 +1378,7 @@ cancion compile_primary() {
             }
             emit_push();  // save base address
 
-            // Handle index - simplified to avoid recursion
+            // Handle index - support simple expressions (avoid deep recursion)
             si (tok_type == 2) {
                 // Number literal index
                 emit_mov_rax_imm32(tok_int_val);
@@ -1335,7 +1389,7 @@ cancion compile_primary() {
                     decreto idx_off: entero = sym_find();
                     decreto gidx: entero = 0;
                     si (idx_off == 0) { gidx = glob_find(); }
-                    siguiente_token();  // consume before using
+                    siguiente_token();
                     si (idx_off != 0) {
                         emit_load(idx_off);
                     } sino {
@@ -1344,6 +1398,36 @@ cancion compile_primary() {
                         } sino {
                             emit_xor_rax_rax();
                         }
+                    }
+                    // Check for + or - after variable (support var + expr)
+                    si (tok_type == 11) {
+                        // + operator
+                        emit_push();
+                        siguiente_token();
+                        // Get second operand (simple: number or variable only)
+                        si (tok_type == 2) {
+                            emit_mov_rax_imm32(tok_int_val);
+                            siguiente_token();
+                        } sino {
+                            si (tok_type == 1) {
+                                decreto idx2: entero = sym_find();
+                                decreto gidx2: entero = 0;
+                                si (idx2 == 0) { gidx2 = glob_find(); }
+                                siguiente_token();
+                                si (idx2 != 0) {
+                                    emit_load(idx2);
+                                } sino {
+                                    si (gidx2 != 0) {
+                                        emit_load_global(gidx2 - 1);
+                                    } sino {
+                                        emit_xor_rax_rax();
+                                    }
+                                }
+                            }
+                        }
+                        emit_mov_rcx();
+                        emit_pop();
+                        emit_add();
                     }
                 } sino {
                     emit_xor_rax_rax();
@@ -1764,13 +1848,14 @@ cancion compile_statement() {
         si (is_kw_mientras() == 1) {
             // while loop: mientras (cond) { body }
             siguiente_token();  // skip mientras
-            g_loop_start = code_pos;
+            // Use local variables to avoid clobbering by nested loops
+            decreto my_loop_start: entero = code_pos;
             si (tok_type == 4) { siguiente_token(); }  // skip (
             compile_comparison();
             si (tok_type == 5) { siguiente_token(); }  // skip )
 
             emit_cmp_rax_0();
-            g_je_addr = emit_je();
+            decreto my_je_addr: entero = emit_je();
 
             si (tok_type == 6) { siguiente_token(); }  // skip {
             mientras (tok_type != 7) {
@@ -1781,9 +1866,9 @@ cancion compile_statement() {
 
             // Jump back to loop start
             emit_byte(233);  // jmp rel32
-            decreto rel: entero = g_loop_start - code_pos - 4;
+            decreto rel: entero = my_loop_start - code_pos - 4;
             emit_dword(rel);
-            emit_patch(g_je_addr);
+            emit_patch(my_je_addr);
             retorno;
         }
         // Check for assignment or function call
@@ -1824,7 +1909,7 @@ cancion compile_statement() {
 
             siguiente_token();  // skip [
 
-            // Handle index - simplified (number or variable only)
+            // Handle index - support simple expressions (var + var)
             si (tok_type == 2) {
                 emit_mov_rax_imm32(tok_int_val);
                 siguiente_token();
@@ -1833,7 +1918,7 @@ cancion compile_statement() {
                     decreto idx_off: entero = sym_find();
                     decreto gidx_off: entero = 0;
                     si (idx_off == 0) { gidx_off = glob_find(); }
-                    siguiente_token();  // consume identifier before emitting
+                    siguiente_token();
                     si (idx_off != 0) {
                         emit_load(idx_off);
                     } sino {
@@ -1842,6 +1927,34 @@ cancion compile_statement() {
                         } sino {
                             emit_xor_rax_rax();
                         }
+                    }
+                    // Check for + operator (support var + expr)
+                    si (tok_type == 11) {
+                        emit_push();
+                        siguiente_token();
+                        si (tok_type == 2) {
+                            emit_mov_rax_imm32(tok_int_val);
+                            siguiente_token();
+                        } sino {
+                            si (tok_type == 1) {
+                                decreto idx2: entero = sym_find();
+                                decreto gidx2: entero = 0;
+                                si (idx2 == 0) { gidx2 = glob_find(); }
+                                siguiente_token();
+                                si (idx2 != 0) {
+                                    emit_load(idx2);
+                                } sino {
+                                    si (gidx2 != 0) {
+                                        emit_load_global(gidx2 - 1);
+                                    } sino {
+                                        emit_xor_rax_rax();
+                                    }
+                                }
+                            }
+                        }
+                        emit_mov_rcx();
+                        emit_pop();
+                        emit_add();
                     }
                 } sino {
                     emit_xor_rax_rax();
@@ -2189,19 +2302,7 @@ cancion compile_program() {
 
     // Emit entry stub: call principal, then exit with return value
     emit_byte(232);  // call rel32
-    // Emit the relative offset (signed 32-bit)
-    si (entry_rel < 0) {
-        decreto u: entero = entry_rel + 4294967296;
-        emit_byte(u);
-        emit_byte(u / 256);
-        emit_byte(u / 65536);
-        emit_byte(u / 16777216);
-    } sino {
-        emit_byte(entry_rel);
-        emit_byte(entry_rel / 256);
-        emit_byte(entry_rel / 65536);
-        emit_byte(entry_rel / 16777216);
-    }
+    emit_dword(entry_rel);  // Use emit_dword for proper two's complement handling
     emit_byte(72); emit_byte(137); emit_byte(199);  // mov rdi, rax
     emit_byte(72); emit_byte(199); emit_byte(192);  // mov rax, imm32
     emit_byte(60); emit_byte(0); emit_byte(0); emit_byte(0);  // 60 (sys_exit)
