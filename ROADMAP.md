@@ -16,19 +16,18 @@
 
 ---
 
-## Current Status: SELF-HOSTING ACHIEVED ✅
+## Current Status: SELF-HOSTING + STRUCTS ✅
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  C Compiler     │────▶│  Bootstrap v3   │────▶│  Bootstrap v4   │
-│  (archived)     │     │  (backup)       │     │  (main)         │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                              │                        │
-                              └────── IDENTICAL ───────┘
-                              MD5: 84cdcc71c77efddbf2d41b36d1f4f55c
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  C Compiler     │────▶│  Bootstrap v3   │────▶│  Bootstrap v4   │────▶│  Bootstrap v5   │
+│  (archived)     │     │  (backup)       │     │  (recursion)    │     │  (structs)      │
+└─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
+                                                                                │
+                                                                         SELF-HOSTING ✓
 ```
 
-**The Viva compiler compiles itself. C compiler no longer needed.**
+**The Viva compiler compiles itself with struct support. C compiler no longer needed.**
 
 ### Working Features
 | Feature | Syntax | Status |
@@ -47,9 +46,9 @@
 | System calls | `escribir_sys(fd, buf, len)` | ✅ |
 | Self-hosting | Compiles itself | ✅ |
 | Recursion | `factorial(n - 1)` | ✅ |
+| Structs | `estructura Point { x: entero; }` | ✅ |
 
 ### Current Limitations
-- ❌ Structs
 - ❌ Pointers
 - ❌ Heap allocation
 - ❌ Strings (only literals)
@@ -71,19 +70,27 @@ cancion factorial(n: entero): entero {
 
 **Fixed:** Added expression support in function arguments (e.g., `n - 1`)
 
-### 1.2 Add Structs
+### 1.2 Add Structs ✅ DONE
 **Unlocks:** Complex data types, data modeling, protocols
 
 ```viva
-estructura Punto {
+estructura Point {
     x: entero;
     y: entero;
 }
 
-decreto p: Punto;
+decreto p: Point;
 p.x = 10;
 p.y = 20;
+retorno p.x + p.y;  // Returns 30
 ```
+
+**Implemented:**
+- Struct definitions with `estructura` keyword
+- Field access with dot syntax (`.`)
+- Field assignment support
+- Sequential memory layout (fields at offsets 0, 8, 16...)
+- Works with global variables
 
 ### 1.3 Add Pointers
 **Unlocks:** References, linked structures, dynamic data
