@@ -205,6 +205,7 @@ cancion siguiente_token() {
     si (c == 47) { tok_type = 14; pos = pos + 1; retorno; }
     si (c == 91) { tok_type = 19; pos = pos + 1; retorno; }
     si (c == 93) { tok_type = 20; pos = pos + 1; retorno; }
+    si (c == 46) { tok_type = 26; pos = pos + 1; retorno; }  // . for struct fields
 
     // String literal
     si (c == 34) {
@@ -410,6 +411,21 @@ cancion is_kw_sino(): entero {
     si (tok_buf[1] != 105) { retorno 0; }  // i
     si (tok_buf[2] != 110) { retorno 0; }  // n
     si (tok_buf[3] != 111) { retorno 0; }  // o
+    retorno 1;
+}
+
+cancion is_kw_estructura(): entero {
+    si (tok_len != 10) { retorno 0; }
+    si (tok_buf[0] != 101) { retorno 0; }  // e
+    si (tok_buf[1] != 115) { retorno 0; }  // s
+    si (tok_buf[2] != 116) { retorno 0; }  // t
+    si (tok_buf[3] != 114) { retorno 0; }  // r
+    si (tok_buf[4] != 117) { retorno 0; }  // u
+    si (tok_buf[5] != 99) { retorno 0; }   // c
+    si (tok_buf[6] != 116) { retorno 0; }  // t
+    si (tok_buf[7] != 117) { retorno 0; }  // u
+    si (tok_buf[8] != 114) { retorno 0; }  // r
+    si (tok_buf[9] != 97) { retorno 0; }   // a
     retorno 1;
 }
 
@@ -1235,6 +1251,13 @@ cancion glob_elem_size(): entero {
     retorno glob_elem_sizes[g_glob_idx];
 }
 
+cancion glob_struct_type(): entero {
+    // Get struct type index of last found global (via g_glob_idx)
+    // Returns struct_idx (>0 if struct) or 0 if not a struct
+    si (g_glob_idx >= glob_cnt) { retorno 0; }
+    retorno glob_struct_idx[g_glob_idx];
+}
+
 // Compile a primary expression (number, variable, function call, or parenthesized)
 cancion compile_primary() {
     si (tok_type == 2) {
@@ -1307,21 +1330,85 @@ cancion compile_primary() {
 
             siguiente_token();  // skip (
 
-            // Compile arguments - simplified to avoid deep recursion
+            // Compile arguments - support var+/-num expressions for recursion
             si (tok_type != 5) {
-                // First argument -> rdi (handle only simple cases)
+                // First argument -> rdi
                 si (tok_type == 2) {
                     // Number literal
                     emit_mov_rax_imm32(tok_int_val);
                     siguiente_token();
                 } sino {
                     si (tok_type == 1) {
-                        // Variable
+                        // Variable - check local then global
                         decreto arg_off: entero = sym_find();
+                        decreto arg_goff: entero = 0;
+                        si (arg_off == 0) { arg_goff = glob_find(); }
+                        siguiente_token();
                         si (arg_off != 0) {
                             emit_load(arg_off);
+                        } sino {
+                            si (arg_goff != 0) {
+                                emit_load_global(arg_goff - 1);
+                            } sino {
+                                emit_xor_rax_rax();
+                            }
                         }
-                        siguiente_token();
+                        // Check for - after variable (e.g., n - 1)
+                        si (tok_type == 12) {
+                            emit_push();
+                            siguiente_token();
+                            si (tok_type == 2) {
+                                emit_mov_rax_imm32(tok_int_val);
+                                siguiente_token();
+                            } sino {
+                                si (tok_type == 1) {
+                                    decreto sub_off: entero = sym_find();
+                                    decreto sub_goff: entero = 0;
+                                    si (sub_off == 0) { sub_goff = glob_find(); }
+                                    siguiente_token();
+                                    si (sub_off != 0) {
+                                        emit_load(sub_off);
+                                    } sino {
+                                        si (sub_goff != 0) {
+                                            emit_load_global(sub_goff - 1);
+                                        } sino {
+                                            emit_xor_rax_rax();
+                                        }
+                                    }
+                                }
+                            }
+                            emit_mov_rcx();
+                            emit_pop();
+                            emit_sub();
+                        }
+                        // Check for + after variable (e.g., n + 1)
+                        si (tok_type == 11) {
+                            emit_push();
+                            siguiente_token();
+                            si (tok_type == 2) {
+                                emit_mov_rax_imm32(tok_int_val);
+                                siguiente_token();
+                            } sino {
+                                si (tok_type == 1) {
+                                    decreto add_off: entero = sym_find();
+                                    decreto add_goff: entero = 0;
+                                    si (add_off == 0) { add_goff = glob_find(); }
+                                    siguiente_token();
+                                    si (add_off != 0) {
+                                        emit_load(add_off);
+                                    } sino {
+                                        si (add_goff != 0) {
+                                            emit_load_global(add_goff - 1);
+                                        } sino {
+                                            emit_xor_rax_rax();
+                                        }
+                                    }
+                                }
+                            }
+                            emit_mov_rcx();
+                            emit_pop();
+                            emit_add();
+                        }
                     }
                 }
                 emit_mov_rdi_from_rax();
@@ -1335,10 +1422,74 @@ cancion compile_primary() {
                     } sino {
                         si (tok_type == 1) {
                             decreto arg_off2: entero = sym_find();
+                            decreto arg_goff2: entero = 0;
+                            si (arg_off2 == 0) { arg_goff2 = glob_find(); }
+                            siguiente_token();
                             si (arg_off2 != 0) {
                                 emit_load(arg_off2);
+                            } sino {
+                                si (arg_goff2 != 0) {
+                                    emit_load_global(arg_goff2 - 1);
+                                } sino {
+                                    emit_xor_rax_rax();
+                                }
                             }
-                            siguiente_token();
+                            // Check for - after variable
+                            si (tok_type == 12) {
+                                emit_push();
+                                siguiente_token();
+                                si (tok_type == 2) {
+                                    emit_mov_rax_imm32(tok_int_val);
+                                    siguiente_token();
+                                } sino {
+                                    si (tok_type == 1) {
+                                        decreto sub2_off: entero = sym_find();
+                                        decreto sub2_goff: entero = 0;
+                                        si (sub2_off == 0) { sub2_goff = glob_find(); }
+                                        siguiente_token();
+                                        si (sub2_off != 0) {
+                                            emit_load(sub2_off);
+                                        } sino {
+                                            si (sub2_goff != 0) {
+                                                emit_load_global(sub2_goff - 1);
+                                            } sino {
+                                                emit_xor_rax_rax();
+                                            }
+                                        }
+                                    }
+                                }
+                                emit_mov_rcx();
+                                emit_pop();
+                                emit_sub();
+                            }
+                            // Check for + after variable
+                            si (tok_type == 11) {
+                                emit_push();
+                                siguiente_token();
+                                si (tok_type == 2) {
+                                    emit_mov_rax_imm32(tok_int_val);
+                                    siguiente_token();
+                                } sino {
+                                    si (tok_type == 1) {
+                                        decreto add2_off: entero = sym_find();
+                                        decreto add2_goff: entero = 0;
+                                        si (add2_off == 0) { add2_goff = glob_find(); }
+                                        siguiente_token();
+                                        si (add2_off != 0) {
+                                            emit_load(add2_off);
+                                        } sino {
+                                            si (add2_goff != 0) {
+                                                emit_load_global(add2_goff - 1);
+                                            } sino {
+                                                emit_xor_rax_rax();
+                                            }
+                                        }
+                                    }
+                                }
+                                emit_mov_rcx();
+                                emit_pop();
+                                emit_add();
+                            }
                         }
                     }
                     emit_mov_rsi_from_rax();
@@ -1449,6 +1600,57 @@ cancion compile_primary() {
             }
 
             si (tok_type == 20) { siguiente_token(); }  // skip ]
+            retorno;
+        }
+
+        // Check if followed by '.' - then it's struct field access
+        si (tok_type == 26) {
+            // Struct field access: name.field
+            siguiente_token();  // skip .
+
+            // Now tok_buf has field name - save it before any further calls
+            decreto fname_len: entero = tok_len;
+            decreto fname_buf: [64]octeto;
+            decreto fi: entero = 0;
+            mientras (fi < tok_len) {
+                fname_buf[fi] = tok_buf[fi];
+                fi = fi + 1;
+            }
+
+            // Get struct type from the global variable
+            decreto st_idx: entero = glob_struct_type();
+
+            siguiente_token();  // consume field name
+
+            si (st_idx != 0) {
+                // Copy field name back to tok_buf for lookup
+                decreto fj: entero = 0;
+                mientras (fj < fname_len) {
+                    tok_buf[fj] = fname_buf[fj];
+                    fj = fj + 1;
+                }
+                tok_len = fname_len;
+
+                // Look up field
+                decreto found: entero = struct_field_find(st_idx - 1);
+                si (found == 1) {
+                    // Get base address of struct
+                    emit_lea_global(goff - 1);
+                    // Add field offset if non-zero
+                    si (g_field_off != 0) {
+                        emit_push();
+                        emit_mov_rax_imm32(g_field_off);
+                        emit_mov_rcx();
+                        emit_pop();
+                        emit_add();
+                    }
+                    // Load value from address
+                    emit_load_qword_indirect();
+                    retorno;
+                }
+            }
+            // Fall through to zero if not found
+            emit_xor_rax_rax();
             retorno;
         }
 
@@ -1989,6 +2191,65 @@ cancion compile_statement() {
             si (tok_type == 8) { siguiente_token(); }  // skip ;
             retorno;
         }
+        si (tok_type == 26) {
+            // Struct field assignment: identifier.field = expr
+            siguiente_token();  // skip .
+
+            // Now tok_buf has field name - save it before any further calls
+            decreto fname_len: entero = tok_len;
+            decreto fname_buf: [64]octeto;
+            decreto fi: entero = 0;
+            mientras (fi < tok_len) {
+                fname_buf[fi] = tok_buf[fi];
+                fi = fi + 1;
+            }
+
+            // Get struct type from the global variable
+            decreto st_idx: entero = glob_struct_type();
+
+            siguiente_token();  // consume field name
+            si (tok_type == 15) { siguiente_token(); }  // skip =
+
+            si (st_idx != 0) {
+                // Copy field name back to tok_buf for lookup
+                decreto fj: entero = 0;
+                mientras (fj < fname_len) {
+                    tok_buf[fj] = fname_buf[fj];
+                    fj = fj + 1;
+                }
+                tok_len = fname_len;
+
+                // Look up field to get offset
+                decreto found: entero = struct_field_find(st_idx - 1);
+                si (found == 1) {
+                    // Get base address of struct
+                    emit_lea_global(g_glob_off - 1);
+                    // Add field offset if non-zero
+                    si (g_field_off != 0) {
+                        emit_push();
+                        emit_mov_rax_imm32(g_field_off);
+                        emit_mov_rcx();
+                        emit_pop();
+                        emit_add();
+                    }
+                    emit_push();  // save destination address
+
+                    // Compile value expression
+                    compile_comparison();
+
+                    // Now: rax=value, stack top=address
+                    emit_mov_rax_to_rcx();  // rcx = value to store
+                    emit_pop();             // rax = destination address
+                    emit_store_qword_indirect();  // mov [rax], rcx
+
+                    si (tok_type == 8) { siguiente_token(); }  // skip ;
+                    retorno;
+                }
+            }
+            // Field not found - just skip and continue
+            si (tok_type == 8) { siguiente_token(); }  // skip ;
+            retorno;
+        }
         si (tok_type == 4) {
             // Function call as statement: identifier(args);
             decreto fn_addr: entero = fn_find();
@@ -2109,9 +2370,87 @@ decreto glob_offs: [128]entero;
 decreto glob_sizes: [128]entero;
 decreto glob_is_arr: [128]entero;  // 1 if array, 0 if scalar
 decreto glob_elem_sizes: [128]entero;  // Element size: 1 for octeto, 8 for entero
+decreto glob_struct_idx: [128]entero;  // -1 if not struct, else struct type index
 decreto glob_cnt: entero = 0;
 decreto glob_np: entero = 0;
 decreto glob_data_pos: entero = 0;
+
+// Struct type definitions
+decreto struct_names: [512]octeto;    // Names of struct types
+decreto struct_name_starts: [16]entero;  // Start index in struct_names for each struct
+decreto struct_name_lens: [16]entero;    // Length of each struct name
+decreto struct_sizes: [16]entero;        // Total size of each struct
+decreto struct_field_start: [16]entero;  // First field index for each struct
+decreto struct_field_count: [16]entero;  // Number of fields in each struct
+decreto struct_cnt: entero = 0;
+decreto struct_np: entero = 0;
+
+// Struct field definitions
+decreto field_names: [512]octeto;       // Field names
+decreto field_name_starts: [64]entero;  // Start index in field_names
+decreto field_name_lens: [64]entero;    // Length of each field name
+decreto field_offs: [64]entero;         // Offset of field within struct
+decreto field_sizes: [64]entero;        // Size of each field (8 for entero)
+decreto field_cnt: entero = 0;
+decreto field_np: entero = 0;
+
+// Current struct field access info (set by struct_field_find)
+decreto g_field_off: entero = 0;
+decreto g_field_size: entero = 8;
+decreto g_struct_base_off: entero = 0;  // Base offset of struct variable
+
+cancion struct_find(): entero {
+    // Find struct type by name in tok_buf, return index+1 (0=not found)
+    decreto i: entero = 0;
+    mientras (i < struct_cnt) {
+        decreto start: entero = struct_name_starts[i];
+        decreto slen: entero = struct_name_lens[i];
+        si (slen == tok_len) {
+            decreto j: entero = 0;
+            decreto ok: entero = 1;
+            mientras (j < slen) {
+                si (tok_buf[j] != struct_names[start + j]) { ok = 0; }
+                j = j + 1;
+            }
+            si (ok == 1) { retorno i + 1; }
+        }
+        i = i + 1;
+    }
+    retorno 0;
+}
+
+cancion struct_field_find(struct_idx: entero): entero {
+    // Find field in struct by name in tok_buf, set g_field_off
+    // Returns 1 if found, 0 if not found
+    // Note: inline the logic because compiler only supports 2 function args
+    decreto fstart: entero = struct_field_start[struct_idx];
+    decreto fcount: entero = struct_field_count[struct_idx];
+    decreto fi: entero = 0;
+    mientras (fi < fcount) {
+        decreto fidx: entero = fstart + fi;
+        decreto ns: entero = field_name_starts[fidx];
+        decreto nl: entero = field_name_lens[fidx];
+        si (nl == tok_len) {
+            decreto j: entero = 0;
+            decreto ok: entero = 1;
+            mientras (j < nl) {
+                si (tok_buf[j] != field_names[ns + j]) { ok = 0; }
+                j = j + 1;
+            }
+            si (ok == 1) {
+                g_field_off = field_offs[fidx];
+                g_field_size = field_sizes[fidx];
+                retorno 1;
+            }
+        }
+        fi = fi + 1;
+    }
+    retorno 0;
+}
+
+cancion struct_get_size(struct_idx: entero): entero {
+    retorno struct_sizes[struct_idx];
+}
 
 cancion glob_add(size: entero): entero {
     // Add global variable with given size, return data offset
@@ -2139,6 +2478,7 @@ cancion compile_global_var() {
     decreto var_size: entero = 8;
     decreto elem_size: entero = 1;
     decreto is_array: entero = 0;
+    decreto struct_idx: entero = 0;  // 0 = not a struct, >0 = struct type index + 1
 
     // Save name to glob_names before siguiente_token overwrites tok_buf
     decreto name_start: entero = glob_np;
@@ -2175,7 +2515,14 @@ cancion compile_global_var() {
         }
         var_size = var_size * elem_size;
     } sino {
-        si (tok_type == 1) { siguiente_token(); }
+        si (tok_type == 1) {
+            // Check if it's a struct type
+            struct_idx = struct_find();
+            si (struct_idx != 0) {
+                var_size = struct_get_size(struct_idx - 1);
+            }
+            siguiente_token();
+        }
     }
 
     // Register the global variable
@@ -2183,6 +2530,7 @@ cancion compile_global_var() {
     glob_sizes[glob_cnt] = var_size;
     glob_is_arr[glob_cnt] = is_array;  // Track if it's an array
     glob_elem_sizes[glob_cnt] = elem_size;  // Track element size for arrays
+    glob_struct_idx[glob_cnt] = struct_idx;  // Track struct type (0 = not struct)
     glob_cnt = glob_cnt + 1;
     glob_data_pos = glob_data_pos + var_size;
 
@@ -2192,6 +2540,71 @@ cancion compile_global_var() {
         si (tok_type == 2) { siguiente_token(); }  // skip number
     }
     si (tok_type == 8) { siguiente_token(); }  // skip ;
+}
+
+cancion compile_struct_def() {
+    // Parse: estructura Name { field1: type; field2: type; }
+    siguiente_token();  // skip 'estructura'
+
+    // Save struct name
+    struct_name_starts[struct_cnt] = struct_np;
+    struct_name_lens[struct_cnt] = tok_len;
+    decreto i: entero = 0;
+    mientras (i < tok_len) {
+        struct_names[struct_np] = tok_buf[i];
+        struct_np = struct_np + 1;
+        i = i + 1;
+    }
+
+    siguiente_token();  // skip struct name
+    si (tok_type == 6) { siguiente_token(); }  // skip {
+
+    // Parse fields
+    struct_field_start[struct_cnt] = field_cnt;
+    decreto current_off: entero = 0;
+    decreto fc: entero = 0;
+
+    mientras (tok_type != 7) {
+        si (tok_type == 0) { retorno; }
+
+        si (tok_type == 1) {
+            // Field name
+            field_name_starts[field_cnt] = field_np;
+            field_name_lens[field_cnt] = tok_len;
+            decreto j: entero = 0;
+            mientras (j < tok_len) {
+                field_names[field_np] = tok_buf[j];
+                field_np = field_np + 1;
+                j = j + 1;
+            }
+
+            siguiente_token();  // skip field name
+            si (tok_type == 9) { siguiente_token(); }  // skip :
+
+            // Get field type - assume entero (8 bytes) for now
+            decreto fsize: entero = 8;
+            si (tok_type == 1) {
+                si (is_kw_octeto() == 1) {
+                    fsize = 1;
+                }
+                siguiente_token();  // skip type
+            }
+
+            field_offs[field_cnt] = current_off;
+            field_sizes[field_cnt] = fsize;
+            current_off = current_off + fsize;
+            field_cnt = field_cnt + 1;
+            fc = fc + 1;
+        }
+
+        si (tok_type == 8) { siguiente_token(); }  // skip ;
+    }
+
+    struct_field_count[struct_cnt] = fc;
+    struct_sizes[struct_cnt] = current_off;
+    struct_cnt = struct_cnt + 1;
+
+    siguiente_token();  // skip }
 }
 
 cancion compile_program() {
@@ -2238,7 +2651,12 @@ cancion compile_program() {
                     // Process global variable declaration
                     compile_global_var();
                 } sino {
-                    siguiente_token();
+                    si (is_kw_estructura() == 1) {
+                        // Process struct definition
+                        compile_struct_def();
+                    } sino {
+                        siguiente_token();
+                    }
                 }
             }
         } sino {
@@ -2278,7 +2696,23 @@ cancion compile_program() {
                     }
                     si (tok_type == 8) { siguiente_token(); }  // skip ;
                 } sino {
-                    siguiente_token();
+                    si (is_kw_estructura() == 1) {
+                        // Skip struct definition (already processed)
+                        siguiente_token();  // skip estructura
+                        siguiente_token();  // skip name
+                        si (tok_type == 6) {  // {
+                            decreto depth: entero = 1;
+                            siguiente_token();  // skip {
+                            mientras (depth > 0) {
+                                si (tok_type == 0) { retorno; }
+                                si (tok_type == 6) { depth = depth + 1; }
+                                si (tok_type == 7) { depth = depth - 1; }
+                                siguiente_token();
+                            }
+                        }
+                    } sino {
+                        siguiente_token();
+                    }
                 }
             }
         } sino {

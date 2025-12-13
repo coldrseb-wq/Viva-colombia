@@ -1,214 +1,369 @@
-# Viva Colombia Compiler - Development Roadmap
+# Viva Colombia - Development Roadmap
 
-## Language Vision
-Viva is designed to be:
-- **As strict as Rust** - Strong type safety and compile-time guarantees
-- **Safer than Rust** - Memory safety with additional runtime protections
-- **General purpose** - Able to build any product (systems, applications, games, web)
-- **Faster performance** - Direct machine code with aggressive optimizations
-- **Readable like Go** - Clean, simple Spanish-based syntax that's easy to understand
+## Vision: The Language That Has It All
 
-## Project Overview
-Viva Colombia is a Spanish-based programming language focused on Colombian culture and heroes, transitioning from C-code generation to direct machine code generation. The ultimate goal is to achieve bootstrapping - creating a Viva compiler written entirely in Viva that generates direct machine code for Windows, macOS, Linux, and FreeBSD.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  VIVA: Simple as Go, Safe as Rust, Faster than Both            │
+│                                                                 │
+│  ✓ No garbage collector    ✓ No complex annotations            │
+│  ✓ Compile-time safety     ✓ Fast compilation                  │
+│  ✓ Zero-cost abstractions  ✓ First-class Spanish syntax        │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-## Target Platforms
+**Build everything:** Kernels, games, banks, blockchains, web, mobile, OS
+
+---
+
+## Current Status: SELF-HOSTING + STRUCTS ✅
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  C Compiler     │────▶│  Bootstrap v3   │────▶│  Bootstrap v4   │────▶│  Bootstrap v5   │
+│  (archived)     │     │  (backup)       │     │  (recursion)    │     │  (structs)      │
+└─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
+                                                                                │
+                                                                         SELF-HOSTING ✓
+```
+
+**The Viva compiler compiles itself with struct support. C compiler no longer needed.**
+
+### Working Features
+| Feature | Syntax | Status |
+|---------|--------|--------|
+| Functions | `cancion name(): tipo { }` | ✅ |
+| Variables | `decreto x: entero = valor;` | ✅ |
+| Arithmetic | `+ - * /` | ✅ |
+| Comparisons | `== != < > <= >=` | ✅ |
+| Conditionals | `si (cond) { } sino { }` | ✅ |
+| While loops | `mientras (cond) { }` | ✅ |
+| Nested loops | ✅ | ✅ |
+| Arrays | `decreto arr: [N]tipo;` | ✅ |
+| Array expressions | `arr[i + j]` | ✅ |
+| Function calls | `func(arg1, arg2)` | ✅ |
+| Global variables | ✅ | ✅ |
+| System calls | `escribir_sys(fd, buf, len)` | ✅ |
+| Self-hosting | Compiles itself | ✅ |
+| Recursion | `factorial(n - 1)` | ✅ |
+| Structs | `estructura Point { x: entero; }` | ✅ |
+
+### Current Limitations
+- ❌ Pointers
+- ❌ Heap allocation
+- ❌ Strings (only literals)
+- ❌ Multi-platform (Linux x64 only)
+
+---
+
+## Phase 1: Foundation Completion
+
+### 1.1 Fix Recursion ✅ DONE
+**Unlocks:** Recursive algorithms, tree traversal, parsers
+
+```viva
+cancion factorial(n: entero): entero {
+    si (n < 2) { retorno 1; }
+    retorno n * factorial(n - 1);  // Now works!
+}
+```
+
+**Fixed:** Added expression support in function arguments (e.g., `n - 1`)
+
+### 1.2 Add Structs ✅ DONE
+**Unlocks:** Complex data types, data modeling, protocols
+
+```viva
+estructura Point {
+    x: entero;
+    y: entero;
+}
+
+decreto p: Point;
+p.x = 10;
+p.y = 20;
+retorno p.x + p.y;  // Returns 30
+```
+
+**Implemented:**
+- Struct definitions with `estructura` keyword
+- Field access with dot syntax (`.`)
+- Field assignment support
+- Sequential memory layout (fields at offsets 0, 8, 16...)
+- Works with global variables
+
+### 1.3 Add Pointers
+**Unlocks:** References, linked structures, dynamic data
+
+```viva
+decreto x: entero = 42;
+decreto ptr: *entero = &x;
+decreto valor: entero = *ptr;
+```
+
+---
+
+## Phase 2: Memory System (THE INNOVATION)
+
+### The Viva Memory Model: "Contextual Ownership"
+
+**What makes Viva unique:** Memory strategy determined by CONTEXT, not annotations.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    VIVA MEMORY MODEL                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐       │
+│   │  Stack  │   │  Arena  │   │  Owned  │   │ Counted │       │
+│   │ (auto)  │   │ (bulk)  │   │ (move)  │   │ (share) │       │
+│   └────┬────┘   └────┬────┘   └────┬────┘   └────┬────┘       │
+│        │             │             │             │             │
+│        └─────────────┴─────────────┴─────────────┘             │
+│                          │                                      │
+│              ┌───────────▼───────────┐                         │
+│              │  CONTEXT DETERMINES   │                         │
+│              │  WHICH STRATEGY USED  │                         │
+│              └───────────────────────┘                         │
+│                                                                 │
+│   NO GARBAGE COLLECTOR. EVER. DETERMINISTIC. PREDICTABLE.     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 2.1 Arena Allocator
+**Unlocks:** Web servers, game engines, compilers
+
+```viva
+arena peticion {
+    // All allocations use this arena
+    usuario = cargar_usuario(id);
+    datos = procesar(usuario);
+    respuesta = generar(datos);
+}  // Everything freed instantly - O(1)
+```
+
+**Why it's revolutionary:**
+- No individual tracking
+- No reference counting overhead
+- Bulk free in O(1)
+- Perfect for request/frame/phase patterns
+
+### 2.2 Ownership (Simplified)
+**No lifetime annotations. Compiler infers or asks.**
+
+```viva
+decreto datos = crear_datos();  // datos owns memory
+usar(datos);                     // borrowed (inferred)
+consumir(datos);                 // moved (inferred)
+// datos gone, memory freed
+
+// Only annotate when TRULY ambiguous (rare)
+```
+
+### 2.3 Semantic Lifetimes (Innovation)
+**Instead of `'a, 'b, 'c` - meaningful names:**
+
+```viva
+// Memory tied to MEANINGFUL scopes
+cancion manejar(): respuesta@peticion {
+    config = cargar()@aplicacion;   // Lives for app lifetime
+    usuario = obtener()@sesion;     // Lives for session
+    datos = procesar()@peticion;    // Lives for this request
+    retorno crear_respuesta(datos);
+}
+```
+
+More readable than Rust. Self-documenting.
+
+### 2.4 Compile-Time Proofs
+**Zero runtime cost, total safety:**
+
+```viva
+// Compiler PROVES this is safe
+decreto arr: [100]entero;
+decreto i: indice{0..99};    // Type includes constraint
+arr[i];                       // No bounds check needed!
+
+// Compiler REJECTS this
+decreto j: entero = 150;
+arr[j];  // Error: cannot prove j < 100
+```
+
+---
+
+## Phase 3: Real Applications
+
+### 3.1 Strings
+**Unlocks:** Text processing, web, JSON, protocols
+
+```viva
+decreto nombre: texto = "Viva Colombia";
+decreto largo: entero = nombre.len;
+escribir(nombre);
+```
+
+### 3.2 Dynamic Arrays
+**Unlocks:** Lists, buffers, real applications
+
+```viva
+decreto lista: Vec<entero> = Vec.crear();
+lista.agregar(42);
+lista.agregar(100);
+```
+
+### 3.3 File I/O
+**Unlocks:** Real applications, databases
+
+```viva
+decreto archivo = abrir("datos.txt");
+decreto contenido = leer(archivo);
+cerrar(archivo);
+```
+
+### 3.4 Networking
+**Unlocks:** Web servers, distributed systems, blockchain
+
+```viva
+decreto servidor = escuchar(8080);
+mientras (verdad) {
+    decreto conexion = aceptar(servidor);
+    arena peticion {
+        manejar(conexion);
+    }
+}
+```
+
+---
+
+## Phase 4: Advanced Features
+
+### 4.1 Effect System
+**Know at compile time what a function does:**
+
+```viva
+cancion pura calcular(x: entero): entero { }      // No side effects
+cancion io guardar(datos: texto) { }               // Does I/O
+cancion muta cambiar(arr: *[10]entero) { }        // Mutates
+
+// Compiler enforces: pura functions cannot call io functions!
+```
+
+### 4.2 Refinement Types
+**Catch logic errors at compile time:**
+
+```viva
+decreto edad: entero{0..150};           // Valid age range
+decreto porcentaje: entero{0..100};     // Valid percentage
+decreto indice: entero{0..len-1};       // Valid array index
+
+edad = -5;        // COMPILE ERROR: -5 not in range
+porcentaje = 200; // COMPILE ERROR: 200 > 100
+```
+
+### 4.3 Linear Resources
+**Use exactly once, automatic cleanup:**
+
+```viva
+decreto archivo: recurso = abrir("data.txt");
+leer(archivo);     // Consumes archivo
+leer(archivo);     // COMPILE ERROR: already consumed
+// No close() needed - compiler inserts cleanup
+```
+
+### 4.4 Pattern Matching
+```viva
+coincide resultado {
+    Exito(valor) => usar(valor);
+    Error(msg) => reportar(msg);
+}
+```
+
+---
+
+## Phase 5: Platform Expansion
+
+### 5.1 Target Platforms
 | Platform | Format | Status |
 |----------|--------|--------|
-| Linux | ELF | ✅ Complete |
-| macOS | Mach-O | ✅ Complete |
-| Windows | PE/COFF | ✅ Complete |
+| Linux x64 | ELF | ✅ Complete |
+| Linux ARM64 | ELF | 🔜 Planned |
+| macOS x64 | Mach-O | 🔜 Planned |
+| macOS ARM64 | Mach-O | 🔜 Planned |
+| Windows x64 | PE | 🔜 Planned |
 | FreeBSD | ELF | 🔜 Planned |
+| WebAssembly | WASM | 🔜 Planned |
+| iOS | Mach-O | 🔜 Future |
+| Android | ELF | 🔜 Future |
 
-FreeBSD uses ELF format like Linux but with different syscall numbers (read=3, write=4, exit=1).
+### 5.2 FFI (Foreign Function Interface)
+**Use existing C libraries:**
 
-## Phase 1: Foundation & C-Code Generation (COMPLETED)
-### Objectives:
-- Create basic compiler infrastructure
-- Implement C-code generation capability
-- Support core language features
-
-### Completed Tasks:
-- ✅ Basic compiler architecture (C-based implementation)
-- ✅ Lexer, parser, and interpreter functionality
-- ✅ C-code generation backend
-- ✅ Support for Colombian-themed functions (Simón Bolívar, etc.)
-- ✅ Variable declarations and assignments
-- ✅ Function calls and println operations
-- ✅ Expression evaluation (arithmetic operations)
-
-### Status: COMPLETED
-
-## Phase 2: Assembly Generation Infrastructure (COMPLETED)
-### Objectives:
-- Transition from C-code to assembly code generation
-- Implement proper assembly syntax handling
-- Establish cross-platform foundation
-
-### Completed Tasks:
-- ✅ Dual output mode (C and Assembly)
-- ✅ x86-64 assembly generation capability
-- ✅ NASM assembly format support
-- ✅ Assembly compilation flag (`-s` option)
-- ✅ Basic instruction generation (mov, call, etc.)
-- ✅ Buffered output system for proper assembly structure
-- ✅ String literal label management
-- ✅ Data section and code section handling
-
-### Status: COMPLETED
-
-## Phase 3: Assembly-to-Machine Code Transition (IN PROGRESS)
-### Objectives:
-- Fix assembly generation structural issues
-- Generate syntactically correct x86-64 assembly
-- Implement proper string literal handling
-
-### Current Tasks:
-- ✅ Assembly structure (data before code sections)
-- ✅ String literal label generation and reference
-- ✅ Proper x86-64 instruction syntax
-- ✅ Cross-platform assembly compatibility
-
-### Status: IN PROGRESS
-
-## Phase 4: Object File Generation (COMPLETED)
-### Objectives:
-- Generate native object files (ELF, Mach-O, PE)
-- Direct machine code generation
-- OS-specific executable format support
-
-### Completed Tasks:
-- ✅ ELF object file generation (Linux) - Complete ELF structure with sections (.text, .data, .symtab, .strtab)
-- ✅ Mach-O object file generation (macOS) - Complete Mach-O structure for x86-64
-- ✅ PE/COFF object file generation (Windows) - Basic PE header structure implemented
-- ✅ Cross-platform executable format detection and generation
-- ✅ Proper section headers with correct structure for all platforms
-- ✅ Symbol table generation with function symbols (main, etc.)
-- ✅ Basic x86-64 machine code instruction generation
-- ✅ Relocation support infrastructure for external function calls
-- ✅ Machine code generation for basic operations (push, mov, pop, ret)
-- ✅ Command-line interface for cross-platform targeting
-
-### Additional Features:
-- ✅ Cross-compilation: Generate code for Linux, macOS, Windows from any platform
-- ✅ Platform-specific binary formats with proper headers and structure
-- ✅ Backward compatibility: Existing `-e` flag still defaults to Linux ELF
-
-### Status: COMPLETED
-
-## Phase 5: Cross-Platform Optimization & Advanced Features (IN PROGRESS)
-### Objectives:
-- Advanced cross-compilation capability with full platform feature parity
-- Performance optimization
-- Advanced language features
-
-### Completed Tasks:
-- ✅ Machine code optimization passes - Basic instruction generation
-- ✅ Basic expression evaluation in machine code
-- ✅ Loop and conditional support in AST
-- ✅ Function call implementation in machine code
-- ✅ Symbol table and relocation infrastructure
-- ✅ Cross-compilation targeting all platforms (Linux, macOS, Windows)
-- ✅ Complete variable storage management with proper stack frame tracking
-- ✅ Fixed variable lookup for all output modes (C, Assembly, ELF)
-- ✅ Proper register allocation for complex operations
-- ✅ Complete machine code implementation for conditionals (if/else statements) with both C and assembly backends
-- ✅ Added support for 'sino' (else) clauses in Spanish if statements
-- ✅ Complete expression evaluation in machine code including comparison operations
-- ✅ Proper conditional jump handling with offset calculation in ELF mode
-- ✅ Assignment operation fixes for all output modes
-
-### Current Tasks:
-- [ ] FreeBSD platform support (ELF with FreeBSD syscalls)
-- [ ] Advanced machine code optimization passes
-- [ ] Memory management in machine code
-- [ ] Function definition support in machine code
-- [ ] Complete Colombian cultural features
-
-### Status: IN PROGRESS
-
-## Phase 6: Final Implementation & Testing (PLANNED)
-### Objectives:
-- Full machine code compilation
-- Multi-platform testing
-- Performance validation
-
-### Planned Tasks:
-- [ ] End-to-end compilation without C dependencies
-- [ ] Cross-platform compatibility testing
-- [ ] Performance benchmarks
-- [ ] Complete test suite
-- [ ] Documentation and tooling
-
-### Status: PLANNED
-
-## Current State Summary
-The Viva compiler has made tremendous progress toward direct machine code compilation rivaling Go and Rust:
-- ✅ Successfully transitioned from C-code to assembly generation
-- ✅ Implemented proper ELF object file generation with complete section headers
-- ✅ Implemented proper Mach-O object file generation for macOS
-- ✅ Implemented basic PE/COFF object file generation for Windows
-- ✅ Created symbol table and relocation infrastructure for external function calls
-- ✅ Generated basic x86-64 machine code with proper instruction encoding
-- ✅ Established foundation for optimization passes and advanced features
-- ✅ Cross-compilation capability: Generate code for Linux, macOS, and Windows from any platform
-- ✅ Command-line interface supporting cross-platform targeting with `-e -p [platform]` flags
-
-The compiler now generates proper platform-specific object files (ELF, Mach-O, PE) that can be linked with system libraries, marking a major milestone toward rivaling Go and Rust for cross-platform direct machine code compilation.
-
-## Bootstrapping Path
-The progression toward a fully bootstrapped Viva compiler:
-1. **Phase 1-4**: Current C-written compiler enhanced to generate direct machine code (steps in this roadmap) - **MAJOR MILESTONES ACHIEVED**
-2. **Future Phase**: Use this machine code generating compiler to create a Viva compiler written in Viva itself
-3. **Final Goal**: Viva compiler (written in Viva) that generates direct machine code - achieving true bootstrapping
-
-## Self-Hosting Status (IN PROGRESS)
-
-### Current Architecture
-```
-┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│   C Compiler        │────▶│   Bootstrap v1      │────▶│   Bootstrap v2      │
-│   (src/*.c)         │     │   (viva_bootstrap)  │     │   (self-hosted)     │
-│   Written in C      │     │   Compiled by C     │     │   Compiled by v1    │
-└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
+```viva
+externo "C" {
+    cancion printf(fmt: *octeto, ...): entero;
+    cancion malloc(size: entero): *octeto;
+}
 ```
 
-### What We're Trying to Achieve
-- **Goal**: Make the bootstrap compiler (`bootstrap/viva_bootstrap.viva`) compile itself
-- **Success Criteria**: bootstrap_v2 should be byte-identical (or functionally equivalent) to bootstrap_v1
-- **Why It Matters**: Self-hosting proves the language is complete enough to write real software
+---
 
-### Completed Self-Hosting Fixes
-- ✅ Increased string literal buffers (8KB → 32KB, 64 → 256 entries)
-- ✅ Removed recursive `siguiente_token()` calls that caused stack overflow
-- ✅ Added bounds checking in `leer_cadena()` for string safety
-- ✅ Fixed entry stub generation (moved to end when `main_addr` is known)
-- ✅ Added `find_src_len()` for proper source length detection
-- ✅ Increased code/data buffer sizes (131KB code, 16KB data)
-- ✅ Two-pass compilation for forward references
-- ✅ Element size tracking for arrays
+## What Becomes Possible
 
-### Current Problems
-1. **Empty code section in bootstrap_v2**: When bootstrap_v1 compiles the bootstrap source, the resulting binary has:
-   - Correct ELF headers
-   - String literals in data section (working)
-   - Empty code section (`code_pos` appears to be 0)
+| After Phase | Can Build |
+|-------------|-----------|
+| **Now** | CLI tools, compilers, calculators, algorithms |
+| **Phase 1** | Recursive algorithms, parsers, interpreters |
+| **Phase 2** | Web servers, game engines, databases |
+| **Phase 3** | Full applications, file processors, network tools |
+| **Phase 4** | Provably correct software, safety-critical systems |
+| **Phase 5** | Cross-platform apps, mobile, browser (WASM) |
 
-2. **Suspected issue area**: Something between line 77-98 of the bootstrap source causes code generation to stop. This area contains the `leer_identificador` and `leer_numero` functions.
+---
 
-3. **Debugging complexity**: The bootstrap compiler doesn't have debug output, making it hard to trace where code generation fails.
+## The Viva Difference
 
-### Next Steps for Self-Hosting
-1. [ ] Add diagnostic output to bootstrap compiler
-2. [ ] Trace code_pos value through compilation
-3. [ ] Identify specific construct causing code generation to fail
-4. [ ] Fix the code generation issue
-5. [ ] Verify bootstrap_v2 produces working executables
-6. [ ] Compare bootstrap_v1 and bootstrap_v2 output
+| Aspect | Viva | Rust | Go |
+|--------|------|------|-----|
+| Memory Safety | ✅ Compile-time | ✅ Compile-time | ✅ GC |
+| Logic Errors | ✅ Refinement types | ❌ Runtime | ❌ Runtime |
+| Learning Curve | Low (no annotations) | High (lifetimes) | Low |
+| Compile Speed | Fast | Slow | Fast |
+| Runtime Cost | Zero | Near-zero | GC pauses |
+| Syntax | Spanish (readable) | English (complex) | English (simple) |
 
-## Next Critical Steps
-1. **Fix self-hosting** - Resolve the empty code section in bootstrap_v2
-2. **Add FreeBSD support** - ELF with FreeBSD syscall numbers
-3. Complete advanced machine code optimization passes
-4. Enhance PE/COFF format with full COFF section structure
-5. Develop comprehensive runtime system with memory management
-6. Add complete expression evaluation and control flow in machine code
+---
+
+## Immediate Next Steps
+
+```
+Priority 1: Foundation
+├── [✅] Fix recursion (unblocks algorithms) - DONE!
+├── [ ] Add structs (unblocks data modeling)
+└── [ ] Add pointers (unblocks dynamic data)
+
+Priority 2: Memory System
+├── [ ] Basic malloc/free
+├── [ ] Arena allocator
+└── [ ] Ownership tracking
+
+Priority 3: Real Apps
+├── [ ] Strings
+├── [ ] File I/O
+└── [ ] Networking
+```
+
+---
+
+## Philosophy
+
+> "Simple enough for beginners, powerful enough for systems programming,
+> safe enough for banks, fast enough for games."
+
+Viva doesn't copy. Viva innovates:
+- **Contextual Ownership** - Memory strategy from context, not annotations
+- **Semantic Lifetimes** - Meaningful names, not `'a, 'b, 'c`
+- **Refinement Types** - Catch logic errors, not just type errors
+- **Effect Tracking** - Know what functions do at compile time
+- **Spanish First** - Programming in your native language
+
+**¡Viva Colombia!** 🇨🇴
