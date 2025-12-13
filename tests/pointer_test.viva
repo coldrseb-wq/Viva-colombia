@@ -1,0 +1,18 @@
+// Pointer test for Viva compiler
+// Tests: address-of (&), dereference (*), pointer assignment (*ptr = value)
+
+cancion main(): entero {
+    // Test 1: Basic pointer operations
+    decreto x: entero = 42;
+    decreto ptr: *entero = &x;
+
+    // Test 2: Dereference - should get 42
+    decreto val: entero = *ptr;
+
+    // Test 3: Pointer assignment - change x through ptr
+    *ptr = 100;
+
+    // x should now be 100
+    // Return x to verify pointer assignment worked
+    retorno x;
+}
