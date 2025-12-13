@@ -6,6 +6,7 @@
 // ============================================================
 
 decreto src: [131072]octeto;
+decreto src2: [65536]octeto;  // Secondary buffer for pipe reads > 65536 bytes
 decreto src_len: entero = 0;
 decreto pos: entero = 0;
 decreto tok_type: entero = 0;
@@ -2867,8 +2868,15 @@ cancion principal() {
     escribir_sys(2, "Viva Bootstrap Compiler\n", 24);
     escribir_sys(2, "Reading source from stdin...\n", 29);
 
-    // Read source from stdin
-    leer_sys(0, src, 131072);
+    // Read source from stdin (in two chunks due to pipe buffer limit)
+    leer_sys(0, src, 65536);
+    leer_sys(0, src2, 65536);
+    // Copy src2 into src at offset 65536
+    decreto ci: entero = 0;
+    mientras (ci < 65536) {
+        src[65536 + ci] = src2[ci];
+        ci = ci + 1;
+    }
 
     // Find actual input length by scanning for last non-null byte
     src_len = find_src_len();
