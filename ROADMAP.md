@@ -46,9 +46,9 @@
 | Global variables | ✅ | ✅ |
 | System calls | `escribir_sys(fd, buf, len)` | ✅ |
 | Self-hosting | Compiles itself | ✅ |
+| Recursion | `factorial(n - 1)` | ✅ |
 
 ### Current Limitations
-- ❌ Recursion (argument passing bug)
 - ❌ Structs
 - ❌ Pointers
 - ❌ Heap allocation
@@ -59,18 +59,17 @@
 
 ## Phase 1: Foundation Completion
 
-### 1.1 Fix Recursion [CRITICAL]
+### 1.1 Fix Recursion ✅ DONE
 **Unlocks:** Recursive algorithms, tree traversal, parsers
 
 ```viva
 cancion factorial(n: entero): entero {
     si (n < 2) { retorno 1; }
-    retorno n * factorial(n - 1);  // Currently broken
+    retorno n * factorial(n - 1);  // Now works!
 }
 ```
 
-**Problem:** Function arguments not passed correctly in recursive calls
-**Solution:** Fix calling convention, proper stack frame setup
+**Fixed:** Added expression support in function arguments (e.g., `n - 1`)
 
 ### 1.2 Add Structs
 **Unlocks:** Complex data types, data modeling, protocols
@@ -331,7 +330,7 @@ externo "C" {
 
 ```
 Priority 1: Foundation
-├── [ ] Fix recursion (unblocks algorithms)
+├── [✅] Fix recursion (unblocks algorithms) - DONE!
 ├── [ ] Add structs (unblocks data modeling)
 └── [ ] Add pointers (unblocks dynamic data)
 

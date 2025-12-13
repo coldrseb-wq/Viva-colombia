@@ -1307,21 +1307,85 @@ cancion compile_primary() {
 
             siguiente_token();  // skip (
 
-            // Compile arguments - simplified to avoid deep recursion
+            // Compile arguments - support var+/-num expressions for recursion
             si (tok_type != 5) {
-                // First argument -> rdi (handle only simple cases)
+                // First argument -> rdi
                 si (tok_type == 2) {
                     // Number literal
                     emit_mov_rax_imm32(tok_int_val);
                     siguiente_token();
                 } sino {
                     si (tok_type == 1) {
-                        // Variable
+                        // Variable - check local then global
                         decreto arg_off: entero = sym_find();
+                        decreto arg_goff: entero = 0;
+                        si (arg_off == 0) { arg_goff = glob_find(); }
+                        siguiente_token();
                         si (arg_off != 0) {
                             emit_load(arg_off);
+                        } sino {
+                            si (arg_goff != 0) {
+                                emit_load_global(arg_goff - 1);
+                            } sino {
+                                emit_xor_rax_rax();
+                            }
                         }
-                        siguiente_token();
+                        // Check for - after variable (e.g., n - 1)
+                        si (tok_type == 12) {
+                            emit_push();
+                            siguiente_token();
+                            si (tok_type == 2) {
+                                emit_mov_rax_imm32(tok_int_val);
+                                siguiente_token();
+                            } sino {
+                                si (tok_type == 1) {
+                                    decreto sub_off: entero = sym_find();
+                                    decreto sub_goff: entero = 0;
+                                    si (sub_off == 0) { sub_goff = glob_find(); }
+                                    siguiente_token();
+                                    si (sub_off != 0) {
+                                        emit_load(sub_off);
+                                    } sino {
+                                        si (sub_goff != 0) {
+                                            emit_load_global(sub_goff - 1);
+                                        } sino {
+                                            emit_xor_rax_rax();
+                                        }
+                                    }
+                                }
+                            }
+                            emit_mov_rcx();
+                            emit_pop();
+                            emit_sub();
+                        }
+                        // Check for + after variable (e.g., n + 1)
+                        si (tok_type == 11) {
+                            emit_push();
+                            siguiente_token();
+                            si (tok_type == 2) {
+                                emit_mov_rax_imm32(tok_int_val);
+                                siguiente_token();
+                            } sino {
+                                si (tok_type == 1) {
+                                    decreto add_off: entero = sym_find();
+                                    decreto add_goff: entero = 0;
+                                    si (add_off == 0) { add_goff = glob_find(); }
+                                    siguiente_token();
+                                    si (add_off != 0) {
+                                        emit_load(add_off);
+                                    } sino {
+                                        si (add_goff != 0) {
+                                            emit_load_global(add_goff - 1);
+                                        } sino {
+                                            emit_xor_rax_rax();
+                                        }
+                                    }
+                                }
+                            }
+                            emit_mov_rcx();
+                            emit_pop();
+                            emit_add();
+                        }
                     }
                 }
                 emit_mov_rdi_from_rax();
@@ -1335,10 +1399,74 @@ cancion compile_primary() {
                     } sino {
                         si (tok_type == 1) {
                             decreto arg_off2: entero = sym_find();
+                            decreto arg_goff2: entero = 0;
+                            si (arg_off2 == 0) { arg_goff2 = glob_find(); }
+                            siguiente_token();
                             si (arg_off2 != 0) {
                                 emit_load(arg_off2);
+                            } sino {
+                                si (arg_goff2 != 0) {
+                                    emit_load_global(arg_goff2 - 1);
+                                } sino {
+                                    emit_xor_rax_rax();
+                                }
                             }
-                            siguiente_token();
+                            // Check for - after variable
+                            si (tok_type == 12) {
+                                emit_push();
+                                siguiente_token();
+                                si (tok_type == 2) {
+                                    emit_mov_rax_imm32(tok_int_val);
+                                    siguiente_token();
+                                } sino {
+                                    si (tok_type == 1) {
+                                        decreto sub2_off: entero = sym_find();
+                                        decreto sub2_goff: entero = 0;
+                                        si (sub2_off == 0) { sub2_goff = glob_find(); }
+                                        siguiente_token();
+                                        si (sub2_off != 0) {
+                                            emit_load(sub2_off);
+                                        } sino {
+                                            si (sub2_goff != 0) {
+                                                emit_load_global(sub2_goff - 1);
+                                            } sino {
+                                                emit_xor_rax_rax();
+                                            }
+                                        }
+                                    }
+                                }
+                                emit_mov_rcx();
+                                emit_pop();
+                                emit_sub();
+                            }
+                            // Check for + after variable
+                            si (tok_type == 11) {
+                                emit_push();
+                                siguiente_token();
+                                si (tok_type == 2) {
+                                    emit_mov_rax_imm32(tok_int_val);
+                                    siguiente_token();
+                                } sino {
+                                    si (tok_type == 1) {
+                                        decreto add2_off: entero = sym_find();
+                                        decreto add2_goff: entero = 0;
+                                        si (add2_off == 0) { add2_goff = glob_find(); }
+                                        siguiente_token();
+                                        si (add2_off != 0) {
+                                            emit_load(add2_off);
+                                        } sino {
+                                            si (add2_goff != 0) {
+                                                emit_load_global(add2_goff - 1);
+                                            } sino {
+                                                emit_xor_rax_rax();
+                                            }
+                                        }
+                                    }
+                                }
+                                emit_mov_rcx();
+                                emit_pop();
+                                emit_add();
+                            }
                         }
                     }
                     emit_mov_rsi_from_rax();
