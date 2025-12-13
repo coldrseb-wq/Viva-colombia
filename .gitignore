@@ -65,3 +65,14 @@ backup_*
 *_fixed.c
 *_fixed.s
 *_simplified.c
+# Build artifacts
+*.elf
+bootstrap_v1
+bootstrap_v2
+bootstrap_v2.elf
+-o
+
+# Debug files
+*_debug.txt
+*_err.txt
+debug.txt
