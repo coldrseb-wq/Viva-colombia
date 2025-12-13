@@ -1279,7 +1279,7 @@ static void compile_func(Compiler* c, ASTNode* n) {
         emit(c, "    return 0;\n}\n\n");
     }
     else if (c->mode == OUT_ASM) {
-        emit(c, "%s:\n    push rbp\n    mov rbp,rsp\n    sub rsp,256\n", name);
+        emit(c, "%s:\n    push rbp\n    mov rbp,rsp\n    sub rsp,32768\n", name);
         // Copy params from registers to stack
         const char* regs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
         p = n->params;
@@ -1298,7 +1298,7 @@ static void compile_func(Compiler* c, ASTNode* n) {
         encode_push_rbp(c->mc);
         encode_mov_rbp_rsp(c->mc);
         int stack_reserve_pos = get_current_offset(c->mc);
-        encode_sub_rsp_imm32(c->mc, 256);
+        encode_sub_rsp_imm32(c->mc, 32768);
 
         // Copy params from registers to stack (System V ABI)
         p = n->params;
@@ -1326,7 +1326,7 @@ static void compile_func(Compiler* c, ASTNode* n) {
 
         // Patch stack size
         int actual = (-c->stack_off + 15) & ~15;
-        if (actual < 256) actual = 256;
+        if (actual < 32768) actual = 32768;
         memcpy(c->mc->code + stack_reserve_pos + 3, &actual, 4);
 
         encode_xor_rax_rax(c->mc);
@@ -1451,7 +1451,7 @@ static void compile_main(Compiler* c, ASTNode* ast) {
     } else if (c->mc) {
         encode_push_rbp(c->mc);
         encode_mov_rbp_rsp(c->mc);
-        encode_sub_rsp_imm8(c->mc, 128);
+        encode_sub_rsp_imm32(c->mc, 32768);
     }
 
     compile_node(c, ast);
@@ -1459,7 +1459,7 @@ static void compile_main(Compiler* c, ASTNode* ast) {
     if (c->mode == OUT_C) {
         emit(c, "    return 0;\n}\n");
     } else if (c->mode == OUT_ASM) {
-        emit(c, "main:\n    push rbp\n    mov rbp,rsp\n    sub rsp,256\n");
+        emit(c, "main:\n    push rbp\n    mov rbp,rsp\n    sub rsp,32768\n");
         emit(c, "    xor rax,rax\n    leave\n    ret\n");
     } else if (c->mc) {
         encode_xor_rax_rax(c->mc);
